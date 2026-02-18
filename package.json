@@ -1,0 +1,49 @@
+{
+  "name": "event-ordering-system",
+  "version": "1.0.0",
+  "description": "QR-based event food ordering system with chatbot interface",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "nodemon server/index.js",
+    "dev:frontend": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "start:prod": "NODE_ENV=production node server/index.js",
+    "prod": "npm run build && npm run start:prod",
+    "test:prod": "npm run build && npm run start:prod",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "qr": "node scripts/generate-qr.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.1",
+    "ws": "^8.14.2",
+    "stripe": "^13.11.0",
+    "twilio": "^4.19.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zustand": "^4.4.7",
+    "qrcode": "^1.5.3",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.8",
+    "nodemon": "^3.0.2",
+    "concurrently": "^8.2.2",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "tsx": "^4.7.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

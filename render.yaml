@@ -1,0 +1,15 @@
+# Render.com – one web service (Node + static frontend)
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: event-ordering
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUBLIC_URL
+        sync: false
+        # Set in Render dashboard to your live URL, e.g. https://event-ordering.onrender.com

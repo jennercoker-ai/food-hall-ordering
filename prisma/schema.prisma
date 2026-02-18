@@ -1,0 +1,81 @@
+// prisma/schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrderType {
+  DINE_IN
+  DELIVERY
+}
+
+enum ItemStatus {
+  RECEIVED
+  PREPARING
+  IN_TRANSIT
+  READY_AT_HUB
+  COLLECTED
+}
+
+model Vendor {
+  id        String     @id @default(cuid())
+  name      String
+  cuisine   String
+  imageUrl  String?
+  items     MenuItem[]
+  orders    Order[]
+}
+
+model MenuItem {
+  id        String   @id @default(cuid())
+  name      String
+  price     Float
+  category  String
+  region    String?  // e.g., West Africa, North Africa
+  allergens String[]
+  isVegan   Boolean
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  vendorId  String?
+  location  String?
+  cart      Json?    // cart items for in-progress orders
+  createdAt DateTime @default(now())
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     Int?        // display number e.g. 101-999
+  orderType       OrderType   @default(DINE_IN)
+  status          String      @default("PENDING")
+  totalAmount     Float
+  deliveryAddress String?
+  deliveryFee     Float       @default(0.0)
+  customerPhone   String?
+  specialInstructions String?
+  vendorId        String?     // one order per vendor for notifications
+  vendor          Vendor?    @relation(fields: [vendorId], references: [id])
+  items           OrderItem[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model OrderItem {
+  id          String     @id @default(cuid())
+  orderId     String
+  order       Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  name        String
+  price       Float
+  quantity    Int        @default(1)
+  vendorName  String
+  vendorId    String?    // for filtering
+  guestName   String?
+  status      ItemStatus @default(RECEIVED)
+}
