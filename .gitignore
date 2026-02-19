@@ -44,3 +44,12 @@ Thumbs.db
 
 # Misc
 .cache/
+
+# Next.js build output and cache
+nextjs-app/.next/
+nextjs-app/out/
+nextjs-app/node_modules/
+
+# SQLite dev database
+prisma/dev.db
+prisma/dev.db-journal
