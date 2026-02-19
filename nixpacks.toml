@@ -1,0 +1,12 @@
+[phases.setup]
+# Provide OpenSSL so Prisma's query engine binary works
+nixPkgs = ["openssl"]
+
+[phases.install]
+cmds = ["npm ci --ignore-scripts"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm run start:prod"
