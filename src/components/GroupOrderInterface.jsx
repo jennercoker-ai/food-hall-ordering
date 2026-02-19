@@ -6,7 +6,7 @@ import VendorGallery from './VendorGallery';
 import FilterBar from './FilterBar';
 import MenuCard from './MenuCard';
 
-const API_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function GroupOrderInterface({ onOrderComplete }) {
   const [showCart, setShowCart] = useState(false);

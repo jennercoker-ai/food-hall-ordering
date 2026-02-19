@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 /**
  * useConcierge - React hook for the Food Hall Concierge chatbot

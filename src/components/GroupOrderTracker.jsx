@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function GroupOrderTracker({ groupId, orders: initialOrders, onClose }) {
   const [orders, setOrders] = useState(initialOrders || []);

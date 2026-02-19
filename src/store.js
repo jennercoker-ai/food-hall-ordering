@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 // In production build set VITE_API_URL="" so API is same-origin
-const API_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const useStore = create((set, get) => ({
   // Session state
