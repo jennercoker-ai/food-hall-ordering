@@ -1,7 +1,16 @@
 node_modules
 dist
 .git
+
+# Secret env files — never copy into Docker
 .env
-.env.*
+.env.local
+.env.*.local
+
+# .env.production is safe — contains only VITE_ build flags, no secrets
+# DO NOT add .env.production here
+
 *.log
 .DS_Store
+nextjs-app
+prisma/dev.db

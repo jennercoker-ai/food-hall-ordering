@@ -9,8 +9,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --ignore-scripts
 
-# Copy source and build
+# Copy source (includes .env.production for Vite)
 COPY . .
+
+# Vite build — explicitly clear API URL so all calls are same-origin
+ENV VITE_API_URL=""
 RUN npm run build && npm prune --production
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
