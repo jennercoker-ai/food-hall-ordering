@@ -17,6 +17,26 @@ const links = [
     icon: '🍕',
   },
   {
+    title: 'Food Hall Concierge',
+    description: 'AI-powered assistant with dietary filtering, smart upselling, and group awareness',
+    url: `${BASE}/?view=concierge`,
+    icon: '🎩',
+    highlight: true,
+  },
+  {
+    title: 'Group Order (Concierge)',
+    description: 'Concierge mode with group/family sharing suggestions enabled',
+    url: `${BASE}/?view=concierge&group=demo-group`,
+    icon: '👥',
+  },
+  {
+    title: 'Family Order Mode',
+    description: 'Lead guest controls payment. Shared basket grouped by person with cart locking.',
+    url: `${BASE}/?view=family`,
+    icon: '👨‍👩‍👧‍👦',
+    highlight: true,
+  },
+  {
     title: 'Browse vendors & menus',
     description: 'Same app – use the "Browse Vendors" tab to see all vendors and menus',
     url: `${BASE}/`,
@@ -28,6 +48,31 @@ const links = [
     description: 'Live view of every order from every vendor',
     url: `${BASE}/?view=central`,
     icon: '📺',
+  },
+  {
+    title: 'Customer dashboard',
+    description: 'Track your orders by phone number – single orders & multi-vendor deliveries',
+    url: `${BASE}/?view=customer`,
+    icon: '👤',
+  },
+  {
+    title: 'Delivery dashboard',
+    description: 'Aggregated deliveries – mark dispatched/delivered, view tickets',
+    url: `${BASE}/?view=delivery-dashboard`,
+    icon: '🚚',
+  },
+  {
+    title: 'Vendor dashboard (pick vendor)',
+    description: 'Select a vendor to manage orders and update status',
+    url: `${BASE}/?view=vendor`,
+    icon: '🏪',
+  },
+  {
+    title: 'Kitchen Display System (KDS)',
+    description: 'Kitchen staff view – mark items as cooking/ready with real-time updates',
+    url: `${BASE}/?view=kds`,
+    icon: '🍳',
+    highlight: true,
   },
   {
     title: "Tony's Pizza – vendor dashboard",
@@ -75,6 +120,8 @@ function DemoHub() {
               className={`text-left p-6 rounded-2xl border transition-all hover:scale-[1.02] hover:shadow-xl ${
                 item.primary
                   ? 'bg-gradient-to-br from-purple-600 to-pink-600 border-purple-500 shadow-lg'
+                  : item.highlight
+                  ? 'bg-gradient-to-br from-indigo-600 to-purple-600 border-indigo-500 shadow-lg'
                   : 'bg-slate-800 border-slate-600 hover:border-purple-500'
               }`}
             >

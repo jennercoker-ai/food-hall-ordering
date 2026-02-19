@@ -7,6 +7,8 @@ const WebSocket = require('ws');
 const http = require('http');
 require('dotenv').config();
 
+const { createConciergeRoutes } = require('./concierge');
+
 const isProduction = process.env.NODE_ENV === 'production';
 
 // Prisma client for handoff (persisted orders)
@@ -40,16 +42,45 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+// In production everything is served same-origin, so CORS is only needed for dev.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5173')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow same-origin requests (no Origin header) and listed origins
+    if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'production') {
+      cb(null, true);
+    } else {
+      cb(null, false);
+    }
+  },
+  credentials: true,
+}));
+
+// Security headers for production
+if (isProduction) {
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+}
+
+app.use(bodyParser.json({ limit: '1mb' }));
+app.use(bodyParser.urlencoded({ extended: false }));
 
 // In-memory storage (replace with actual database in production)
 const database = {
   vendors: new Map(),
   menus: new Map(),
   orders: new Map(),
-  sessions: new Map()
+  sessions: new Map(),
+  deliveries: new Map()
 };
 
 // Initialize sample vendors and menu data
@@ -549,9 +580,19 @@ const initializeData = () => {
 
 initializeData();
 
+// Initialize Food Hall Concierge routes
+createConciergeRoutes(app, prisma, database);
+
 // WebSocket connection handling
 const vendorConnections = new Map();
 const centralConnections = new Set();
+
+// SSE connections for live order updates (orderId -> Set of response objects)
+const orderSSEConnections = new Map();
+// SSE connections for customer order tracking (customerPhone -> Set of response objects)
+const customerSSEConnections = new Map();
+// SSE connections for group order tracking (groupId -> Set of response objects)
+const groupSSEConnections = new Map();
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -601,6 +642,53 @@ const notifyCentral = (order, eventType) => {
       ws.send(payload);
     }
   });
+};
+
+// Utility function to send SSE update to order subscribers
+const notifyOrderSSE = (orderId, data) => {
+  const connections = orderSSEConnections.get(orderId);
+  if (connections) {
+    const payload = `data: ${JSON.stringify(data)}\n\n`;
+    connections.forEach(res => {
+      try {
+        res.write(payload);
+      } catch (e) {
+        // Connection closed, will be cleaned up
+      }
+    });
+  }
+};
+
+// Utility function to send SSE update to customer subscribers
+const notifyCustomerSSE = (customerPhone, data) => {
+  if (!customerPhone) return;
+  const connections = customerSSEConnections.get(customerPhone);
+  if (connections) {
+    const payload = `data: ${JSON.stringify(data)}\n\n`;
+    connections.forEach(res => {
+      try {
+        res.write(payload);
+      } catch (e) {
+        // Connection closed, will be cleaned up
+      }
+    });
+  }
+};
+
+// Utility function to send SSE update to group subscribers
+const notifyGroupSSE = (groupId, data) => {
+  if (!groupId) return;
+  const connections = groupSSEConnections.get(groupId);
+  if (connections) {
+    const payload = `data: ${JSON.stringify(data)}\n\n`;
+    connections.forEach(res => {
+      try {
+        res.write(payload);
+      } catch (e) {
+        // Connection closed, will be cleaned up
+      }
+    });
+  }
 };
 
 // Utility function to send SMS notifications
@@ -662,19 +750,30 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// QR code for customers (unified chatbot URL) – share or print
+// QR code image endpoint — accepts ?url= param, falls back to PUBLIC_URL env or request host
 app.get('/api/qr', (req, res) => {
   try {
     const QRCode = require('qrcode');
-    const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
-    const chatbotUrl = baseUrl.replace(/\/$/, '') + '/';
-    QRCode.toBuffer(chatbotUrl, { width: 400, margin: 2, type: 'png' }, (err, buf) => {
+    // Priority: explicit ?url param → PUBLIC_URL env → request host
+    let targetUrl = req.query.url;
+    if (!targetUrl) {
+      const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+      targetUrl = baseUrl.replace(/\/$/, '') + '/';
+    }
+    QRCode.toBuffer(targetUrl, {
+      width: 512,
+      margin: 2,
+      type: 'png',
+      errorCorrectionLevel: 'M',
+      color: { dark: '#0f0f0f', light: '#ffffff' },
+    }, (err, buf) => {
       if (err) {
         res.status(500).json({ error: 'Failed to generate QR code' });
         return;
       }
       res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Content-Disposition', 'inline; filename="order-from-all-vendors.png"');
+      res.setHeader('Content-Disposition', 'inline; filename="food-hall-qr.png"');
+      res.setHeader('Cache-Control', 'no-cache');
       res.send(buf);
     });
   } catch (e) {
@@ -683,33 +782,118 @@ app.get('/api/qr', (req, res) => {
 });
 
 // Get vendor by ID
-app.get('/api/vendors/:vendorId', (req, res) => {
+app.get('/api/vendors/:vendorId', async (req, res) => {
   const { vendorId } = req.params;
-  const vendor = database.vendors.get(vendorId);
   
-  if (!vendor) {
-    return res.status(404).json({ error: 'Vendor not found' });
+  try {
+    // Try Prisma first for full data including collectionPoint
+    if (prisma) {
+      const vendor = await prisma.vendor.findUnique({
+        where: { id: vendorId }
+      });
+      
+      if (vendor) {
+        return res.json(vendor);
+      }
+    }
+    
+    // Fallback to in-memory database
+    const vendor = database.vendors.get(vendorId);
+    
+    if (!vendor) {
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+    
+    res.json(vendor);
+  } catch (error) {
+    console.error('Error fetching vendor:', error);
+    // Fallback to in-memory
+    const vendor = database.vendors.get(vendorId);
+    if (vendor) {
+      return res.json(vendor);
+    }
+    res.status(404).json({ error: 'Vendor not found' });
   }
-  
-  res.json(vendor);
 });
 
 // Get all vendors
-app.get('/api/vendors', (req, res) => {
-  const vendors = Array.from(database.vendors.values());
-  res.json(vendors);
+app.get('/api/vendors', async (req, res) => {
+  try {
+    // Use Prisma if available for full vendor data including collectionPoint
+    if (prisma) {
+      const vendors = await prisma.vendor.findMany({
+        orderBy: { name: 'asc' }
+      });
+      return res.json(vendors);
+    }
+    // Fallback to in-memory database
+    const vendors = Array.from(database.vendors.values());
+    res.json(vendors);
+  } catch (error) {
+    console.error('Error fetching vendors:', error);
+    // Fallback to in-memory on error
+    const vendors = Array.from(database.vendors.values());
+    res.json(vendors);
+  }
 });
 
 // Get menu for vendor
-app.get('/api/menu/:vendorId', (req, res) => {
+app.get('/api/menu/:vendorId', async (req, res) => {
   const { vendorId } = req.params;
-  const menu = database.menus.get(vendorId);
   
-  if (!menu) {
-    return res.status(404).json({ error: 'Menu not found' });
+  try {
+    // Use Prisma if available
+    if (prisma) {
+      const menuItems = await prisma.menuItem.findMany({
+        where: { 
+          vendorId,
+          available: true 
+        },
+        include: { vendor: true }
+      });
+      
+      if (menuItems.length === 0) {
+        // Check if vendor exists
+        const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
+        if (!vendor) {
+          return res.status(404).json({ error: 'Vendor not found' });
+        }
+      }
+      
+      // Format items to match expected structure
+      const formattedItems = menuItems.map(item => ({
+        id: item.id,
+        vendorId: item.vendorId,
+        name: item.name,
+        description: item.description,
+        price: item.price,
+        category: item.category,
+        allergens: item.allergens,
+        dietary: item.dietary,
+        available: item.available,
+        isVegan: item.isVegan,
+        vendorName: item.vendor?.name,
+        collectionPoint: item.vendor?.collectionPoint
+      }));
+      
+      return res.json(formattedItems);
+    }
+    
+    // Fallback to in-memory database
+    const menu = database.menus.get(vendorId);
+    if (!menu) {
+      return res.status(404).json({ error: 'Menu not found' });
+    }
+    res.json(menu);
+  } catch (error) {
+    console.error('Error fetching menu:', error);
+    // Fallback to in-memory on error
+    const menu = database.menus.get(vendorId);
+    if (!menu) {
+      return res.status(404).json({ error: 'Menu not found' });
+    }
+    res.json(menu);
   }
-  
-  res.json(menu);
 });
 
 // Search menu items
@@ -801,7 +985,7 @@ app.post('/api/session/:sessionId/cart', (req, res) => {
   res.json(session);
 });
 
-// Handoff: create order(s) in DB from cart (Prisma) – same logic as app/api/handoff/route.ts
+// Handoff: create order(s) in DB from cart (Prisma) – uses relational schema
 app.post('/api/handoff', async (req, res) => {
   if (!prisma) {
     return res.status(503).json({ error: 'Handoff requires DATABASE_URL and Prisma' });
@@ -813,7 +997,9 @@ app.post('/api/handoff', async (req, res) => {
       deliveryAddress,
       guestName: defaultGuestName,
       customerPhone,
-      specialInstructions
+      specialInstructions,
+      paymentId,
+      groupId
     } = req.body;
 
     if (!cart?.length) {
@@ -853,6 +1039,40 @@ app.post('/api/handoff', async (req, res) => {
         }
       }
 
+      const orderItemsData = [];
+      for (const i of items) {
+        let menuItemId = i.menuItemId;
+        let itemVendorId = vendorId;
+        
+        if (!menuItemId && i.name) {
+          const menuItem = await prisma.menuItem.findFirst({
+            where: {
+              name: i.name,
+              ...(itemVendorId ? { vendorId: itemVendorId } : {})
+            }
+          });
+          if (menuItem) {
+            menuItemId = menuItem.id;
+            itemVendorId = menuItem.vendorId;
+          }
+        }
+        
+        if (menuItemId && itemVendorId) {
+          orderItemsData.push({
+            menuItemId,
+            vendorId: itemVendorId,
+            quantity: i.quantity ?? 1,
+            price: i.price,
+            guestName: i.guestName ?? defaultGuestName ?? null,
+            status: 'RECEIVED'
+          });
+        }
+      }
+
+      if (orderItemsData.length === 0) {
+        continue;
+      }
+
       const orderNumber = Math.floor(100 + Math.random() * 900);
       const order = await prisma.order.create({
         data: {
@@ -860,31 +1080,38 @@ app.post('/api/handoff', async (req, res) => {
           orderType,
           status: 'PENDING',
           totalAmount,
+          paymentId: paymentId ?? null,
+          groupId: groupId ?? null,
           deliveryAddress: orderType === 'DELIVERY' ? deliveryAddress ?? null : null,
           deliveryFee: addFee ? 4.99 : 0,
           customerPhone: customerPhone ?? null,
           specialInstructions: specialInstructions ?? null,
           vendorId,
           items: {
-            create: items.map((i) => ({
-              name: i.name,
-              price: i.price,
-              quantity: i.quantity ?? 1,
-              vendorName: i.vendorName ?? 'Vendor',
-              vendorId: vendorId ?? undefined,
-              guestName: i.guestName ?? defaultGuestName ?? null
-            }))
+            create: orderItemsData
           }
         },
-        include: { items: true }
+        include: { 
+          items: {
+            include: {
+              menuItem: true,
+              vendor: true
+            }
+          }
+        }
       });
 
       orders.push({
         id: order.id,
         orderNumber: order.orderNumber ?? orderNumber,
         vendorId,
-        totalAmount: order.totalAmount
+        totalAmount: order.totalAmount,
+        items: order.items
       });
+    }
+
+    if (orders.length === 0) {
+      return res.status(400).json({ error: 'No valid items found in cart' });
     }
 
     return res.json({
@@ -902,7 +1129,17 @@ app.post('/api/handoff', async (req, res) => {
 
 // Create order
 app.post('/api/orders', (req, res) => {
-  const { sessionId, items, customerPhone, specialInstructions } = req.body;
+  const { 
+    sessionId, 
+    items, 
+    customerPhone, 
+    specialInstructions, 
+    destination, 
+    guestName,
+    orderType = 'DINE_IN',
+    tableNumber,
+    deliveryFee = 0
+  } = req.body;
   
   const session = database.sessions.get(sessionId);
   
@@ -920,22 +1157,64 @@ app.post('/api/orders', (req, res) => {
     itemsByVendor[vendorId].push(item);
   });
   
+  const vendorIds = Object.keys(itemsByVendor);
+  const isMultiVendor = vendorIds.length > 1;
+  // Create delivery ticket for multi-vendor orders OR if orderType is DELIVERY
+  const needsDeliveryTicket = isMultiVendor || orderType === 'DELIVERY';
+  const deliveryId = needsDeliveryTicket ? 'DH-' + (1000 + Math.floor(Math.random() * 9000)) : null;
+  
+  if (deliveryId) {
+    database.deliveries.set(deliveryId, {
+      deliveryId,
+      orderIds: [],
+      destination: destination || '',
+      guestName: guestName || '',
+      orderType,
+      status: 'pending', // pending | dispatched | delivered
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  }
+  
   // Create separate orders for each vendor
   const orders = [];
-  Object.keys(itemsByVendor).forEach(vendorId => {
-    const vendorItems = itemsByVendor[vendorId];
+  vendorIds.forEach(vendorId => {
+    const rawItems = itemsByVendor[vendorId];
+    const menu = database.menus.get(vendorId) || [];
+    const menuById = new Map(menu.map(m => [m.id, m]));
+    const vendorItems = rawItems.map(item => {
+      const menuItem = menuById.get(item.id) || {};
+      return {
+        ...item,
+        allergens: menuItem.allergens || [],
+        dietary: menuItem.dietary || []
+      };
+    });
     const orderId = uuidv4();
     const orderNumber = Math.floor(100 + Math.random() * 900);
-    const total = vendorItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const itemsTotal = vendorItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    // Add delivery fee only to first order to avoid double-counting
+    const isFirstOrder = orders.length === 0;
+    const total = itemsTotal + (isFirstOrder && orderType === 'DELIVERY' ? deliveryFee : 0);
+    const vendor = database.vendors.get(vendorId);
+    const vendorName = vendor ? vendor.name : vendorId;
     
     const order = {
       id: orderId,
       orderNumber,
-      vendorId: vendorId,
+      vendorId,
+      vendorName,
+      deliveryId,
       items: vendorItems,
       total,
+      itemsTotal,
+      deliveryFee: isFirstOrder ? deliveryFee : 0,
       customerPhone,
       specialInstructions,
+      destination: destination || null,
+      guestName: guestName || null,
+      orderType,
+      tableNumber: tableNumber || null,
       status: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -943,6 +1222,11 @@ app.post('/api/orders', (req, res) => {
     
     database.orders.set(orderId, order);
     orders.push(order);
+    
+    if (deliveryId) {
+      const d = database.deliveries.get(deliveryId);
+      d.orderIds.push(orderId);
+    }
     
     // Notify vendor via WebSocket
     notifyVendor(vendorId, order);
@@ -956,12 +1240,13 @@ app.post('/api/orders', (req, res) => {
     }
   });
   
-  // Return the first order (or all orders if multiple)
+  // Return the first order (or all orders + deliveryId if multiple)
   if (orders.length === 1) {
     res.json(orders[0]);
   } else {
     res.json({
-      orders: orders,
+      orders,
+      deliveryId,
       message: `Created ${orders.length} orders from different vendors`
     });
   }
@@ -979,6 +1264,494 @@ app.get('/api/orders/:orderId', (req, res) => {
   res.json(order);
 });
 
+// SSE: Live order updates stream
+app.get('/api/orders/:orderId/live', (req, res) => {
+  const { orderId } = req.params;
+  const order = database.orders.get(orderId);
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+  res.flushHeaders();
+  
+  // Send initial connection message
+  const initialData = {
+    status: 'LISTENING',
+    message: 'Live updates active',
+    orderId,
+    currentStatus: order?.status || 'unknown',
+    timestamp: new Date().toISOString()
+  };
+  res.write(`data: ${JSON.stringify(initialData)}\n\n`);
+  
+  // If order exists, send current state
+  if (order) {
+    res.write(`data: ${JSON.stringify({
+      type: 'ORDER_STATE',
+      order: {
+        ...order,
+        vendorName: database.vendors.get(order.vendorId)?.name
+      }
+    })}\n\n`);
+  }
+  
+  // Register this connection
+  if (!orderSSEConnections.has(orderId)) {
+    orderSSEConnections.set(orderId, new Set());
+  }
+  orderSSEConnections.get(orderId).add(res);
+  
+  // Heartbeat to keep connection alive (every 20 seconds)
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (e) {
+      clearInterval(heartbeat);
+    }
+  }, 20000);
+  
+  // Cleanup on connection close
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    const connections = orderSSEConnections.get(orderId);
+    if (connections) {
+      connections.delete(res);
+      if (connections.size === 0) {
+        orderSSEConnections.delete(orderId);
+      }
+    }
+    console.log(`SSE connection closed for order ${orderId}`);
+  });
+});
+
+// SSE: Live updates for group orders
+app.get('/api/group/:groupId/live', async (req, res) => {
+  const { groupId } = req.params;
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({
+    status: 'LISTENING',
+    message: 'Live group updates active',
+    groupId,
+    timestamp: new Date().toISOString()
+  })}\n\n`);
+  
+  // Get current group orders from Prisma if available
+  if (prisma) {
+    try {
+      const orders = await prisma.order.findMany({
+        where: { groupId },
+        include: {
+          items: {
+            include: {
+              menuItem: true,
+              vendor: true
+            }
+          }
+        }
+      });
+      
+      // Calculate group progress
+      const allItems = orders.flatMap(o => o.items);
+      const readyCount = allItems.filter(i => i.status === 'READY' || i.status === 'COLLECTED').length;
+      const totalItems = allItems.length;
+      const progressPercent = totalItems > 0 ? Math.round((readyCount / totalItems) * 100) : 0;
+      
+      res.write(`data: ${JSON.stringify({
+        type: 'GROUP_STATE',
+        orders,
+        progress: {
+          readyCount,
+          totalItems,
+          percent: progressPercent
+        }
+      })}\n\n`);
+    } catch (e) {
+      console.error('Error fetching group orders:', e);
+    }
+  }
+  
+  // Register this connection
+  if (!groupSSEConnections.has(groupId)) {
+    groupSSEConnections.set(groupId, new Set());
+  }
+  groupSSEConnections.get(groupId).add(res);
+  
+  // Heartbeat
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (e) {
+      clearInterval(heartbeat);
+    }
+  }, 20000);
+  
+  // Cleanup on connection close
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    const connections = groupSSEConnections.get(groupId);
+    if (connections) {
+      connections.delete(res);
+      if (connections.size === 0) {
+        groupSSEConnections.delete(groupId);
+      }
+    }
+    console.log(`SSE connection closed for group ${groupId}`);
+  });
+});
+
+// SSE: Live updates for customer (by phone number)
+app.get('/api/customer/live', (req, res) => {
+  const { phone } = req.query;
+  
+  if (!phone) {
+    return res.status(400).json({ error: 'Phone number required' });
+  }
+  
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({
+    status: 'LISTENING',
+    message: 'Live updates active for your orders',
+    timestamp: new Date().toISOString()
+  })}\n\n`);
+  
+  // Send current orders for this customer
+  const customerOrders = Array.from(database.orders.values())
+    .filter(o => o.customerPhone === phone)
+    .map(o => ({
+      ...o,
+      vendorName: database.vendors.get(o.vendorId)?.name
+    }));
+  
+  if (customerOrders.length > 0) {
+    res.write(`data: ${JSON.stringify({
+      type: 'CURRENT_ORDERS',
+      orders: customerOrders
+    })}\n\n`);
+  }
+  
+  // Register this connection
+  if (!customerSSEConnections.has(phone)) {
+    customerSSEConnections.set(phone, new Set());
+  }
+  customerSSEConnections.get(phone).add(res);
+  
+  // Heartbeat
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (e) {
+      clearInterval(heartbeat);
+    }
+  }, 20000);
+  
+  // Cleanup on connection close
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    const connections = customerSSEConnections.get(phone);
+    if (connections) {
+      connections.delete(res);
+      if (connections.size === 0) {
+        customerSSEConnections.delete(phone);
+      }
+    }
+    console.log(`SSE connection closed for customer ${phone}`);
+  });
+});
+
+// Get aggregated delivery (multi-vendor ticket)
+app.get('/api/delivery/:deliveryId', (req, res) => {
+  const { deliveryId } = req.params;
+  const delivery = database.deliveries.get(deliveryId);
+  
+  if (!delivery) {
+    return res.status(404).json({ error: 'Delivery not found' });
+  }
+  
+  const vendors = [];
+  let totalItems = 0;
+  
+  delivery.orderIds.forEach(orderId => {
+    const order = database.orders.get(orderId);
+    if (!order) return;
+    totalItems += order.items.reduce((s, i) => s + (i.quantity || 1), 0);
+    vendors.push({
+      vendorId: order.vendorId,
+      vendorName: order.vendorName || order.vendorId,
+      items: order.items.map(i => ({
+        name: i.name,
+        quantity: i.quantity || 1,
+        allergens: i.allergens || []
+      }))
+    });
+  });
+  
+  res.json({
+    deliveryId,
+    orderNumber: deliveryId,
+    date: delivery.createdAt,
+    destination: delivery.destination || 'Collection at venue',
+    guestName: delivery.guestName || 'Guest',
+    status: delivery.status || 'pending',
+    vendors,
+    totalItems,
+    vendorCount: vendors.length
+  });
+});
+
+// QR code for delivery ticket (live tracking URL)
+app.get('/api/delivery/:deliveryId/qr', (req, res) => {
+  const { deliveryId } = req.params;
+  const delivery = database.deliveries.get(deliveryId);
+  
+  if (!delivery) {
+    return res.status(404).json({ error: 'Delivery not found' });
+  }
+  
+  try {
+    const QRCode = require('qrcode');
+    const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+    const trackingUrl = `${baseUrl.replace(/\/$/, '')}/?view=delivery&deliveryId=${encodeURIComponent(deliveryId)}`;
+    QRCode.toBuffer(trackingUrl, { width: 280, margin: 2, type: 'png' }, (err, buf) => {
+      if (err) {
+        res.status(500).json({ error: 'Failed to generate QR code' });
+        return;
+      }
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Content-Disposition', 'inline; filename="delivery-tracking-qr.png"');
+      res.send(buf);
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'QR failed' });
+  }
+});
+
+// Update individual order item status (for vendors marking items ready)
+app.patch('/api/order-items/:orderItemId/status', async (req, res) => {
+  const { orderItemId } = req.params;
+  const { status, vendorId } = req.body;
+  
+  if (!prisma) {
+    return res.status(503).json({ error: 'Database not available' });
+  }
+  
+  try {
+    // Update the individual item in Prisma
+    const updatedItem = await prisma.orderItem.update({
+      where: { id: orderItemId },
+      data: { status: status || 'READY' },
+      include: { 
+        order: true, 
+        vendor: true,
+        menuItem: true
+      }
+    });
+    
+    // Check if all items in the order are ready
+    const allOrderItems = await prisma.orderItem.findMany({
+      where: { orderId: updatedItem.orderId }
+    });
+    
+    const allReady = allOrderItems.every(item => item.status === 'READY');
+    const readyCount = allOrderItems.filter(item => item.status === 'READY').length;
+    
+    // Prepare notification payload
+    const notificationPayload = {
+      type: 'ITEM_STATUS',
+      orderItemId,
+      orderId: updatedItem.orderId,
+      orderNumber: updatedItem.order.orderNumber,
+      itemName: updatedItem.menuItem?.name || 'Item',
+      itemStatus: updatedItem.status,
+      vendorId: updatedItem.vendorId,
+      vendorName: updatedItem.vendor?.name || 'Vendor',
+      station: updatedItem.vendor?.collectionPoint || null, // e.g., "Station 3"
+      readyCount,
+      totalItems: allOrderItems.length,
+      allReady,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Notify SSE subscribers for this order
+    notifyOrderSSE(updatedItem.orderId, notificationPayload);
+    
+    // Notify group if this order is part of a group
+    if (updatedItem.order.groupId) {
+      notifyGroupSSE(updatedItem.order.groupId, {
+        ...notificationPayload,
+        type: 'GROUP_ITEM_STATUS'
+      });
+    }
+    
+    // Notify customer if they have phone number
+    if (updatedItem.order.customerPhone) {
+      notifyCustomerSSE(updatedItem.order.customerPhone, notificationPayload);
+      
+      // Send SMS when item is ready
+      if (updatedItem.status === 'READY') {
+        const station = updatedItem.vendor?.collectionPoint;
+        const stationInfo = station ? ` Collect at ${station}.` : '';
+        const message = `🍽️ Your ${updatedItem.menuItem?.name || 'item'} from ${updatedItem.vendor?.name} is ready!${stationInfo} (${readyCount}/${allOrderItems.length} items ready)`;
+        sendSMS(updatedItem.order.customerPhone, message);
+      }
+      
+      // Send SMS when all items are ready
+      if (allReady) {
+        const message = `🎉 All ${allOrderItems.length} items from Order #${updatedItem.order.orderNumber} are ready! Please collect from the vendors.`;
+        sendSMS(updatedItem.order.customerPhone, message);
+      }
+    }
+    
+    // Notify central order board
+    const centralPayload = {
+      type: 'ITEM_STATUS',
+      ...notificationPayload
+    };
+    centralConnections.forEach(ws => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(centralPayload));
+      }
+    });
+    
+    // If all items ready, update overall order status
+    if (allReady) {
+      await prisma.order.update({
+        where: { id: updatedItem.orderId },
+        data: { status: 'COMPLETED' }
+      });
+    }
+    
+    console.log(`Order item ${orderItemId} status updated to: ${updatedItem.status} (${readyCount}/${allOrderItems.length} ready)`);
+    
+    res.json({ 
+      success: true,
+      item: updatedItem,
+      readyCount,
+      totalItems: allOrderItems.length,
+      allReady
+    });
+  } catch (error) {
+    console.error('Error updating order item:', error);
+    res.status(500).json({ error: error.message || 'Failed to update item status' });
+  }
+});
+
+// Bulk update: Mark all items from a vendor as ready
+app.patch('/api/orders/:orderId/vendor/:vendorId/ready', async (req, res) => {
+  const { orderId, vendorId } = req.params;
+  
+  if (!prisma) {
+    return res.status(503).json({ error: 'Database not available' });
+  }
+  
+  try {
+    // Update all items from this vendor in this order
+    const result = await prisma.orderItem.updateMany({
+      where: { 
+        orderId,
+        vendorId
+      },
+      data: { status: 'READY' }
+    });
+    
+    // Get updated order with all items
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            vendor: true,
+            menuItem: true
+          }
+        }
+      }
+    });
+    
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    
+    const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
+    const allReady = order.items.every(item => item.status === 'READY');
+    const readyCount = order.items.filter(item => item.status === 'READY').length;
+    
+    // Notification payload
+    const notificationPayload = {
+      type: 'VENDOR_ITEMS_READY',
+      orderId,
+      orderNumber: order.orderNumber,
+      vendorId,
+      vendorName: vendor?.name || 'Vendor',
+      station: vendor?.collectionPoint || null,
+      itemsMarkedReady: result.count,
+      readyCount,
+      totalItems: order.items.length,
+      allReady,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Notify SSE subscribers
+    notifyOrderSSE(orderId, notificationPayload);
+    
+    // Notify group if this order is part of a group
+    if (order.groupId) {
+      notifyGroupSSE(order.groupId, {
+        ...notificationPayload,
+        type: 'GROUP_VENDOR_READY'
+      });
+    }
+    
+    if (order.customerPhone) {
+      notifyCustomerSSE(order.customerPhone, notificationPayload);
+      
+      // SMS notification with collection point
+      const station = vendor?.collectionPoint;
+      const stationInfo = station ? ` Collect at ${station}.` : '';
+      const message = allReady
+        ? `🎉 All items from Order #${order.orderNumber} are ready for collection!`
+        : `✅ Your items from ${vendor?.name} are ready!${stationInfo} (${readyCount}/${order.items.length} items ready)`;
+      sendSMS(order.customerPhone, message);
+    }
+    
+    // Update overall order status if all ready
+    if (allReady) {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { status: 'COMPLETED' }
+      });
+    }
+    
+    console.log(`Vendor ${vendorId} marked ${result.count} items ready for order ${orderId}`);
+    
+    res.json({
+      success: true,
+      itemsUpdated: result.count,
+      readyCount,
+      totalItems: order.items.length,
+      allReady
+    });
+  } catch (error) {
+    console.error('Error bulk updating items:', error);
+    res.status(500).json({ error: error.message || 'Failed to update items' });
+  }
+});
+
 // Update order status (for vendors)
 app.patch('/api/orders/:orderId/status', (req, res) => {
   const { orderId } = req.params;
@@ -990,12 +1763,33 @@ app.patch('/api/orders/:orderId/status', (req, res) => {
     return res.status(404).json({ error: 'Order not found' });
   }
   
+  const previousStatus = order.status;
   order.status = status;
   order.updatedAt = new Date().toISOString();
   database.orders.set(orderId, order);
 
+  // Prepare update payload
+  const updatePayload = {
+    type: 'ORDER_STATUS',
+    orderId,
+    orderNumber: order.orderNumber,
+    previousStatus,
+    status,
+    vendorName: database.vendors.get(order.vendorId)?.name,
+    updatedAt: order.updatedAt,
+    order: { ...order, vendorName: database.vendors.get(order.vendorId)?.name }
+  };
+
   // Notify central order board of status change
   notifyCentral(order, 'ORDER_STATUS');
+  
+  // Notify SSE subscribers for this specific order
+  notifyOrderSSE(orderId, updatePayload);
+  
+  // Notify SSE subscribers for this customer
+  if (order.customerPhone) {
+    notifyCustomerSSE(order.customerPhone, updatePayload);
+  }
 
   // Send SMS notification for status update
   if (order.customerPhone) {
@@ -1026,9 +1820,115 @@ app.get('/api/vendors/:vendorId/orders', (req, res) => {
   res.json(orders);
 });
 
-// Get all orders (for central dashboard)
-app.get('/api/orders', (req, res) => {
+// Get order items for vendor KDS (Kitchen Display System)
+app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
+  const { vendorId } = req.params;
   const { status } = req.query;
+  
+  try {
+    if (prisma) {
+      // Use Prisma to get all order items for this vendor
+      const whereClause = {
+        vendorId: vendorId
+      };
+      
+      // Filter by status if provided, otherwise get active items
+      if (status) {
+        whereClause.status = status;
+      } else {
+        // Default: show items that aren't collected
+        whereClause.status = { not: 'COLLECTED' };
+      }
+      
+      const orderItems = await prisma.orderItem.findMany({
+        where: whereClause,
+        include: {
+          order: {
+            select: {
+              id: true,
+              customerPhone: true,
+              specialInstructions: true,
+              groupId: true,
+              createdAt: true
+            }
+          },
+          menuItem: {
+            select: {
+              id: true,
+              name: true,
+              price: true,
+              category: true
+            }
+          }
+        },
+        orderBy: [
+          { status: 'asc' }, // RECEIVED first, then PREPARING, then READY
+          { order: { createdAt: 'asc' } } // Oldest orders first (FIFO)
+        ]
+      });
+      
+      // Format response with order number (last 4 chars of orderId)
+      const formattedItems = orderItems.map(item => ({
+        ...item,
+        orderId: item.orderId,
+        orderNumber: item.orderId.slice(-4).toUpperCase(),
+        name: item.menuItem?.name || item.name,
+        guestName: item.guestName
+      }));
+      
+      return res.json(formattedItems);
+    }
+    
+    // Fallback: use in-memory database
+    let items = [];
+    database.orders.forEach(order => {
+      if (order.items) {
+        order.items.forEach(item => {
+          if (item.vendorId === vendorId || order.vendorId === vendorId) {
+            items.push({
+              ...item,
+              orderId: order.id,
+              orderNumber: order.id.slice(-4).toUpperCase(),
+              order: {
+                id: order.id,
+                customerName: order.customerName,
+                customerPhone: order.customerPhone,
+                specialInstructions: order.specialInstructions,
+                groupId: order.groupId,
+                createdAt: order.createdAt
+              },
+              status: item.status || 'RECEIVED'
+            });
+          }
+        });
+      }
+    });
+    
+    // Filter by status
+    if (status) {
+      items = items.filter(item => item.status === status);
+    } else {
+      items = items.filter(item => item.status !== 'COLLECTED');
+    }
+    
+    // Sort: RECEIVED first, then PREPARING, then oldest first
+    const statusOrder = { 'RECEIVED': 0, 'PREPARING': 1, 'READY': 2 };
+    items.sort((a, b) => {
+      const statusDiff = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
+      if (statusDiff !== 0) return statusDiff;
+      return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+    });
+    
+    res.json(items);
+  } catch (error) {
+    console.error('Error fetching vendor order items:', error);
+    res.status(500).json({ error: 'Failed to fetch order items' });
+  }
+});
+
+// Get all orders (for central dashboard); optional ?customerPhone= to filter by customer
+app.get('/api/orders', (req, res) => {
+  const { status, customerPhone } = req.query;
 
   let orders = Array.from(database.orders.values()).map(order => ({
     ...order,
@@ -1038,11 +1938,45 @@ app.get('/api/orders', (req, res) => {
   if (status) {
     orders = orders.filter(order => order.status === status);
   }
+  if (customerPhone && customerPhone.trim()) {
+    const phone = customerPhone.trim();
+    orders = orders.filter(order => order.customerPhone && order.customerPhone.trim() === phone);
+  }
 
   // Sort by creation date (newest first)
   orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   res.json(orders);
+});
+
+// Get all deliveries (for delivery dashboard)
+app.get('/api/deliveries', (req, res) => {
+  const { status } = req.query;
+  let list = Array.from(database.deliveries.values()).map(d => ({
+    ...d,
+    orderIds: d.orderIds || []
+  }));
+  if (status) {
+    list = list.filter(d => d.status === status);
+  }
+  list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(list);
+});
+
+// Update delivery status (dispatched / delivered)
+app.patch('/api/delivery/:deliveryId/status', (req, res) => {
+  const { deliveryId } = req.params;
+  const { status } = req.body;
+  const delivery = database.deliveries.get(deliveryId);
+  if (!delivery) {
+    return res.status(404).json({ error: 'Delivery not found' });
+  }
+  if (!['pending', 'dispatched', 'delivered'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+  delivery.status = status;
+  delivery.updatedAt = new Date().toISOString();
+  res.json(delivery);
 });
 
 // Helper function to get all menu items with vendor info
@@ -1154,22 +2088,46 @@ app.post('/api/chat', (req, res) => {
   res.json(response);
 });
 
-// Production: serve built frontend and WebSocket on same port
-if (isProduction) {
-  const distPath = path.join(__dirname, '..', 'dist');
-  app.use(express.static(distPath));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
+// Serve static files from public folder (logos, images, sounds, etc.)
+const publicPath = path.join(__dirname, '..', 'public');
+if (require('fs').existsSync(publicPath)) {
+  app.use(express.static(publicPath, { maxAge: isProduction ? '7d' : 0 }));
 }
 
+// Production: serve built Vite frontend from dist/
+if (isProduction) {
+  const distPath = path.join(__dirname, '..', 'dist');
+  if (require('fs').existsSync(distPath)) {
+    app.use(express.static(distPath, {
+      maxAge: '1d',
+      etag: true,
+      // Don't cache index.html so deploys propagate immediately
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+      },
+    }));
+    // SPA fallback – serve index.html for all non-API routes
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  } else {
+    console.warn('⚠️  dist/ not found — run "npm run build" before starting in production');
+  }
+}
+
+// ─── Start server ──────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || (isProduction ? 3000 : 3001);
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
+  const publicUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
   console.log(`🚀 Server running on port ${PORT}${isProduction ? ' (production)' : ''}`);
   console.log(`📡 WebSocket server ready`);
+  console.log(`🌐 App: ${publicUrl}`);
   if (isProduction) {
-    console.log(`🌐 App: http://localhost:${PORT}`);
-    console.log(`📋 Demo: http://localhost:${PORT}/?view=demo`);
+    console.log(`📋 Demo hub: ${publicUrl}/?view=demo`);
+    console.log(`📲 QR codes: ${publicUrl}/?view=qr`);
+    console.log(`🍳 KDS:      ${publicUrl}/?view=kds`);
   }
 });

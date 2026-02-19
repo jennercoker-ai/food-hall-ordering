@@ -165,7 +165,7 @@ export const useStore = create((set, get) => ({
   },
   
   // Create order
-  createOrder: async (customerPhone, specialInstructions) => {
+  createOrder: async (customerPhone, specialInstructions, destination, guestName, orderType, tableNumber, deliveryFee) => {
     const { session, cart } = get();
     
     if (!session || cart.length === 0) {
@@ -180,16 +180,23 @@ export const useStore = create((set, get) => ({
           sessionId: session.id,
           items: cart,
           customerPhone,
-          specialInstructions
+          specialInstructions,
+          destination: destination || undefined,
+          guestName: guestName || undefined,
+          orderType: orderType || 'DINE_IN',
+          tableNumber: tableNumber || undefined,
+          deliveryFee: deliveryFee || 0
         })
       });
       
       const result = await response.json();
       set({ cart: [] }); // Clear cart
       
-      // Handle multi-vendor orders
+      // Multi-vendor: return delivery ticket info
       if (result.orders && result.orders.length > 0) {
-        // Return the first order ID for navigation
+        if (result.deliveryId) {
+          return { id: result.orders[0].id, deliveryId: result.deliveryId };
+        }
         return result.orders[0];
       }
       

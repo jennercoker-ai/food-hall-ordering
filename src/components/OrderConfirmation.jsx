@@ -46,6 +46,12 @@ function OrderConfirmation({ orderId }) {
     );
   }
 
+  const orderTypeConfig = {
+    DINE_IN: { icon: '🍽️', label: 'Dine In', description: 'Table service' },
+    COLLECTION: { icon: '🛍️', label: 'Collection', description: 'Pick up at counter' },
+    DELIVERY: { icon: '🚚', label: 'Delivery', description: 'Delivering to you' }
+  };
+
   const statusConfig = {
     pending: {
       icon: '⏳',
@@ -67,8 +73,12 @@ function OrderConfirmation({ orderId }) {
     },
     ready: {
       icon: '🎉',
-      title: 'Order Ready!',
-      description: 'Your order is ready for pickup',
+      title: order.orderType === 'DELIVERY' ? 'Out for Delivery!' : 'Order Ready!',
+      description: order.orderType === 'DELIVERY' 
+        ? 'Your order is on its way'
+        : order.orderType === 'DINE_IN' 
+          ? `Your order will be brought to table ${order.tableNumber || 'your table'}`
+          : 'Your order is ready for pickup',
       color: 'bg-green-100 border-green-300 text-green-800'
     },
     completed: {
@@ -97,8 +107,16 @@ function OrderConfirmation({ orderId }) {
               <div className="text-7xl mb-4">{currentStatus.icon}</div>
               <h1 className="text-3xl font-bold mb-2">{currentStatus.title}</h1>
               <p className="text-lg mb-4">{currentStatus.description}</p>
-              <div className="inline-block bg-white bg-opacity-50 px-6 py-3 rounded-full">
-                <span className="text-sm font-semibold">Order #{order.orderNumber}</span>
+              <div className="flex items-center justify-center gap-3 flex-wrap">
+                <div className="inline-block bg-white bg-opacity-50 px-6 py-3 rounded-full">
+                  <span className="text-sm font-semibold">Order #{order.orderNumber}</span>
+                </div>
+                {order.orderType && orderTypeConfig[order.orderType] && (
+                  <div className="inline-flex items-center gap-2 bg-white bg-opacity-70 px-4 py-2 rounded-full">
+                    <span>{orderTypeConfig[order.orderType].icon}</span>
+                    <span className="text-sm font-semibold">{orderTypeConfig[order.orderType].label}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -119,6 +137,34 @@ function OrderConfirmation({ orderId }) {
               ))}
             </div>
 
+            {/* Order Type Info */}
+            {order.orderType === 'DINE_IN' && order.tableNumber && (
+              <div className="mt-4 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                <p className="text-sm text-purple-700 flex items-center gap-2">
+                  <span>🍽️</span>
+                  <span><span className="font-semibold">Table:</span> {order.tableNumber}</span>
+                </p>
+              </div>
+            )}
+            
+            {order.orderType === 'DELIVERY' && order.destination && (
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-sm text-blue-700 flex items-center gap-2">
+                  <span>🚚</span>
+                  <span><span className="font-semibold">Delivering to:</span> {order.destination}</span>
+                </p>
+              </div>
+            )}
+            
+            {order.orderType === 'COLLECTION' && (
+              <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                <p className="text-sm text-green-700 flex items-center gap-2">
+                  <span>📍</span>
+                  <span>Pick up at the collection counter when ready</span>
+                </p>
+              </div>
+            )}
+
             {order.specialInstructions && (
               <div className="mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
                 <p className="text-sm font-semibold text-gray-700 mb-1">Special Instructions:</p>
@@ -127,13 +173,31 @@ function OrderConfirmation({ orderId }) {
             )}
 
             <div className="mt-6 pt-4 border-t-2 border-gray-200">
+              {order.itemsTotal && order.deliveryFee > 0 && (
+                <div className="space-y-2 mb-3">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Subtotal</span>
+                    <span>£{order.itemsTotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-600">
+                    <span>Delivery fee</span>
+                    <span>£{order.deliveryFee.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <span className="text-xl font-bold text-gray-800">Total</span>
                 <span className="text-2xl font-bold text-purple-600">£{order.total.toFixed(2)}</span>
               </div>
               <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-sm text-gray-700">
-                  💷 <span className="font-semibold">Payment:</span> Cash payment on collection
+                  💷 <span className="font-semibold">Payment:</span> {
+                    order.orderType === 'DELIVERY' 
+                      ? 'Pay on delivery' 
+                      : order.orderType === 'DINE_IN'
+                        ? 'Pay at your table'
+                        : 'Cash payment on collection'
+                  }
                 </p>
               </div>
             </div>

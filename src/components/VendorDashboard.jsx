@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:3001';
+const BASE = typeof window !== 'undefined' ? window.location.origin : '';
 const getWsBase = () => {
   const base = API_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
   return base.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
@@ -91,6 +92,7 @@ function VendorDashboard({ vendorId }) {
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6 shadow-lg">
         <div className="max-w-7xl mx-auto">
+          <a href={`${BASE}/?view=demo`} className="text-sm text-white/90 hover:text-white underline inline-block mb-2">← Back to demo hub</a>
           <h1 className="text-3xl font-bold mb-2">{vendor?.name || 'Vendor Dashboard'}</h1>
           <p className="text-purple-100">{vendor?.description}</p>
           

@@ -1,15 +1,27 @@
-# Render.com – one web service (Node + static frontend)
-# https://render.com/docs/blueprint-spec
+# Render deployment configuration
+# https://render.com
+#
+# Deploy in 3 steps:
+#   1. Push this repo to GitHub
+#   2. Go to https://render.com → New → Web Service → Connect GitHub repo
+#   3. Render will auto-detect this file — add DATABASE_URL and PUBLIC_URL
+#      in the Render dashboard under Environment Variables.
+
 services:
   - type: web
-    name: event-ordering
+    name: food-hall-ordering
     runtime: node
-    plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm run start:prod
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PUBLIC_URL
-        sync: false
-        # Set in Render dashboard to your live URL, e.g. https://event-ordering.onrender.com
+      - key: PORT
+        value: 3000
+      # Add these in the Render dashboard (never commit real values):
+      # DATABASE_URL   — your Neon / Supabase / Render PostgreSQL URL
+      # PUBLIC_URL     — the full URL Render assigns (e.g. https://food-hall-ordering.onrender.com)
+      # KDS_SECRET     — optional staff access token
+      # TWILIO_*       — optional SMS
+      # STRIPE_*       — optional card payments

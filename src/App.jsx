@@ -1,16 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from './store';
 import ChatInterface from './components/ChatInterface';
+import ConciergeChat from './components/ConciergeChat';
+import GroupOrderInterface from './components/GroupOrderInterface';
 import VendorDashboard from './components/VendorDashboard';
+import VendorKDS from './components/VendorKDS';
 import OrderConfirmation from './components/OrderConfirmation';
 import CentralDashboard from './components/CentralDashboard';
 import DemoHub from './components/DemoHub';
 import QRCodePage from './components/QRCodePage';
+import DeliveryTicket from './components/DeliveryTicket';
+import CustomerDashboard from './components/CustomerDashboard';
+import DeliveryDashboard from './components/DeliveryDashboard';
+import VendorPicker from './components/VendorPicker';
 
 function App() {
-  const [view, setView] = useState('loading'); // loading, chat, vendor, confirmation
+  const [view, setView] = useState('loading'); // loading, chat, concierge, vendor, confirmation, delivery
   const [vendorId, setVendorId] = useState(null);
   const [orderId, setOrderId] = useState(null);
+  const [deliveryId, setDeliveryId] = useState(null);
+  const [groupId, setGroupId] = useState(null);
   const { initializeSession, session } = useStore();
 
   useEffect(() => {
@@ -32,9 +41,29 @@ function App() {
     } else if (viewParam === 'order') {
       setView('confirmation');
       setOrderId(params.get('orderId'));
+    } else if (viewParam === 'delivery') {
+      setView('delivery');
+      setDeliveryId(params.get('deliveryId'));
+    } else if (viewParam === 'customer') {
+      setView('customer');
+    } else if (viewParam === 'delivery-dashboard') {
+      setView('delivery-dashboard');
+    } else if (viewParam === 'kds') {
+      setView('kds');
+      setVendorId(vendor);
+    } else if (viewParam === 'concierge') {
+      const group = params.get('group');
+      setGroupId(group || null);
+      initializeSession(null, location || 'Event').then(() => {
+        setView('concierge');
+      });
+    } else if (viewParam === 'family' || viewParam === 'group-order') {
+      setView('family');
     } else {
       // Unified chatbot - works with or without vendor
       setVendorId(vendor || null);
+      const group = params.get('group');
+      setGroupId(group || null);
       initializeSession(vendor || null, location || 'Event').then(() => {
         setView('chat');
       });
@@ -50,6 +79,7 @@ function App() {
   }
 
   if (view === 'vendor') {
+    if (!vendorId) return <VendorPicker />;
     return <VendorDashboard vendorId={vendorId} />;
   }
 
@@ -69,13 +99,64 @@ function App() {
     return <OrderConfirmation orderId={orderId} />;
   }
 
+  if (view === 'delivery') {
+    return <DeliveryTicket deliveryId={deliveryId} />;
+  }
+
+  if (view === 'customer') {
+    return <CustomerDashboard />;
+  }
+
+  if (view === 'delivery-dashboard') {
+    return <DeliveryDashboard />;
+  }
+
+  if (view === 'kds') {
+    if (!vendorId) return <VendorPicker onSelect={(id) => setVendorId(id)} forKDS={true} />;
+    return <VendorKDS vendorId={vendorId} />;
+  }
+
+  if (view === 'concierge') {
+    return (
+      <ConciergeChat 
+        sessionId={session?.id}
+        groupId={groupId}
+        onOrderComplete={(result) => {
+          if (result && result.deliveryId) {
+            setDeliveryId(result.deliveryId);
+            setView('delivery');
+          } else {
+            setOrderId(typeof result === 'object' ? result?.id : result);
+            setView('confirmation');
+          }
+        }}
+      />
+    );
+  }
+
+  if (view === 'family') {
+    return (
+      <GroupOrderInterface 
+        onOrderComplete={(orderData) => {
+          console.log('Family order completed:', orderData);
+          setView('confirmation');
+        }}
+      />
+    );
+  }
+
   return (
     <ChatInterface 
       vendorId={vendorId} 
       sessionId={session?.id}
-      onOrderComplete={(orderId) => {
-        setOrderId(orderId);
-        setView('confirmation');
+      onOrderComplete={(result) => {
+        if (result && result.deliveryId) {
+          setDeliveryId(result.deliveryId);
+          setView('delivery');
+        } else {
+          setOrderId(typeof result === 'object' ? result?.id : result);
+          setView('confirmation');
+        }
       }}
     />
   );

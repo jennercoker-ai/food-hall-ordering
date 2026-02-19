@@ -1,12 +1,16 @@
 {
   "name": "event-ordering-system",
   "version": "1.0.0",
-  "description": "QR-based event food ordering system with chatbot interface",
+  "description": "QR-based multi-vendor food hall ordering system with AI concierge, group ordering, and KDS",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "nodemon server/index.js",
     "dev:frontend": "vite",
-    "build": "vite build",
+    "build": "vite build --mode production",
     "start": "node server/index.js",
     "start:prod": "NODE_ENV=production node server/index.js",
     "prod": "npm run build && npm run start:prod",
@@ -15,7 +19,9 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "qr": "node scripts/generate-qr.js"
+    "db:seed": "tsx prisma/seed.ts",
+    "qr": "node scripts/generate-qr.js",
+    "health": "curl -s http://localhost:3000/api/health | node -e \"process.stdin.resume();let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d)))\""
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

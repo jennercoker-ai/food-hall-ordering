@@ -1,4 +1,4 @@
-# Prisma schema
+# Prisma Schema
 
 PostgreSQL is used for vendors, menu items, sessions, and orders.
 
@@ -20,13 +20,61 @@ PostgreSQL is used for vendors, menu items, sessions, and orders.
 
 ## Enums
 
+- **OrderStatus:** `PENDING` | `PAID` | `COMPLETED` | `CANCELLED`
 - **OrderType:** `DINE_IN` | `DELIVERY`
-- **ItemStatus:** `RECEIVED` | `PREPARING` | `IN_TRANSIT` | `READY_AT_HUB` | `COLLECTED`
+- **ItemStatus:** `RECEIVED` | `PREPARING` | `READY` | `COLLECTED`
 
 ## Models
 
-- **Vendor** – id, name, cuisine, imageUrl, menu items
-- **MenuItem** – id, name, price, category, region, allergens, isVegan, vendorId
-- **Session** – id, vendorId?, location?, cart (JSON), for in-progress carts
-- **Order** – id, orderNumber, orderType, status, totalAmount, deliveryAddress, deliveryFee, customerPhone, specialInstructions, vendorId, items, createdAt, updatedAt
-- **OrderItem** – id, orderId, name, price, quantity, vendorName, vendorId, guestName, status (ItemStatus)
+### Vendor
+- `id` (cuid) – Primary key
+- `name` – Vendor name
+- `cuisine` – Type of cuisine
+- `imageUrl` – Optional image
+- Relations: `menuItems`, `orderItems`, `orders`
+
+### MenuItem
+- `id` (cuid) – Primary key
+- `name`, `price`, `category`, `description`
+- `region` – Optional regional classification
+- `allergens` – Array of allergen strings
+- `dietary` – Array of dietary tags (vegan, vegetarian, etc.)
+- `isVegan`, `available` – Boolean flags
+- `vendorId` – FK to Vendor
+- Relations: `vendor`, `orderItems`
+
+### Session
+- `id` (cuid) – Primary key
+- `vendorId`, `location` – Optional context
+- `cart` (JSON) – In-progress cart items
+- `createdAt`
+
+### Order
+- `id` (cuid) – Primary key
+- `orderNumber` – Display number (e.g., 101-999)
+- `orderType` – DINE_IN or DELIVERY
+- `status` – OrderStatus enum
+- `totalAmount`, `deliveryFee`
+- `paymentId` – Stripe/Apple Pay reference
+- `groupId` – For collaborative ordering sessions
+- `deliveryAddress`, `customerPhone`, `specialInstructions`
+- `vendorId` – FK to Vendor (for single-vendor orders)
+- `createdAt`, `updatedAt`
+- Relations: `vendor`, `items`
+
+### OrderItem
+- `id` (cuid) – Primary key
+- `orderId` – FK to Order (cascade delete)
+- `menuItemId` – FK to MenuItem
+- `vendorId` – FK to Vendor
+- `quantity`, `price`
+- `guestName` – For collaborative orders
+- `status` – ItemStatus enum (tracks individual item progress)
+- Relations: `order`, `menuItem`, `vendor`
+
+## Key Features
+
+- **Multi-vendor support:** Orders can span multiple vendors; each OrderItem links to its specific vendor
+- **Collaborative ordering:** `groupId` on Order and `guestName` on OrderItem track who ordered what
+- **Individual item tracking:** Each OrderItem has its own status (e.g., pizza ready, tacos still cooking)
+- **Payment integration:** `paymentId` stores Stripe/Apple Pay references

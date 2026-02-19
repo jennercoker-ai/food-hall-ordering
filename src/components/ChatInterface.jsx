@@ -2,12 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import Cart from './Cart';
 import MenuCard from './MenuCard';
-import VendorsList from './VendorsList';
+import VendorGallery from './VendorGallery';
+import FilterBar from './FilterBar';
+
+const API_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:3001';
 
 function ChatInterface({ vendorId, sessionId, onOrderComplete }) {
   const [inputText, setInputText] = useState('');
   const [showCart, setShowCart] = useState(false);
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'browse'
+  const [filters, setFilters] = useState({ search: '', cuisine: '', dietary: [], excludeAllergens: [] });
+  const [selectedVendorId, setSelectedVendorId] = useState(null);
+  const [vendorMenu, setVendorMenu] = useState([]);
+  const [vendorInfo, setVendorInfo] = useState(null);
+  const [loadingMenu, setLoadingMenu] = useState(false);
   const messagesEndRef = useRef(null);
   
   const { 
@@ -44,6 +52,66 @@ function ChatInterface({ vendorId, sessionId, onOrderComplete }) {
 
   const handleSuggestionClick = (suggestion) => {
     sendMessage(suggestion);
+  };
+
+  const handleSelectVendor = async (vendorId) => {
+    setSelectedVendorId(vendorId);
+    setLoadingMenu(true);
+    try {
+      const [menuRes, vendorRes] = await Promise.all([
+        fetch(`${API_URL}/api/menu/${vendorId}`),
+        fetch(`${API_URL}/api/vendors/${vendorId}`)
+      ]);
+      const menuData = await menuRes.json();
+      const vendorData = await vendorRes.json();
+      
+      const itemsWithVendor = menuData.map(item => ({
+        ...item,
+        vendorName: vendorData.name,
+        vendorId: vendorData.id
+      }));
+      setVendorMenu(itemsWithVendor);
+      setVendorInfo(vendorData);
+    } catch (error) {
+      console.error('Failed to fetch menu:', error);
+    } finally {
+      setLoadingMenu(false);
+    }
+  };
+
+  const handleBackToVendors = () => {
+    setSelectedVendorId(null);
+    setVendorMenu([]);
+    setVendorInfo(null);
+  };
+
+  const getFilteredMenu = () => {
+    let items = vendorMenu;
+    
+    if (filters.dietary?.length > 0) {
+      items = items.filter(item => {
+        const itemDietary = item.dietary || [];
+        return filters.dietary.some(d => itemDietary.includes(d));
+      });
+    }
+    
+    if (filters.excludeAllergens?.length > 0) {
+      items = items.filter(item => {
+        const itemAllergens = item.allergens || [];
+        return !filters.excludeAllergens.some(a => itemAllergens.includes(a));
+      });
+    }
+    
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
+      items = items.filter(item =>
+        item.name.toLowerCase().includes(searchLower) ||
+        item.description?.toLowerCase().includes(searchLower) ||
+        item.category?.toLowerCase().includes(searchLower)
+      );
+    }
+    
+    return items;
   };
 
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -165,7 +233,68 @@ function ChatInterface({ vendorId, sessionId, onOrderComplete }) {
             <div ref={messagesEndRef} />
           </div>
         ) : (
-          <VendorsList />
+          <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+            <FilterBar filters={filters} onFilterChange={setFilters} />
+            
+            {selectedVendorId ? (
+              <div className="p-4">
+                <button
+                  onClick={handleBackToVendors}
+                  className="flex items-center gap-2 text-purple-600 hover:text-purple-800 font-medium mb-4 transition-colors"
+                >
+                  ← Back to Vendors
+                </button>
+                
+                {vendorInfo && (
+                  <div className="mb-4 pb-4 border-b border-gray-100">
+                    <h2 className="text-xl font-bold text-gray-800">{vendorInfo.name}</h2>
+                    <p className="text-gray-600 text-sm mt-1">{vendorInfo.description}</p>
+                    {vendorInfo.cuisine && (
+                      <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                        {vendorInfo.cuisine}
+                      </span>
+                    )}
+                  </div>
+                )}
+                
+                {loadingMenu ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="animate-pulse bg-gray-100 rounded-lg h-24"></div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {getFilteredMenu().length > 0 ? (
+                      getFilteredMenu().map((item) => (
+                        <MenuCard 
+                          key={item.id} 
+                          item={item} 
+                          onAddToCart={(item) => addToCart(item, 1)}
+                        />
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <p className="text-4xl mb-2">🔍</p>
+                        <p>No items match your filters</p>
+                        <button
+                          onClick={() => setFilters({ search: '', cuisine: '', dietary: [], excludeAllergens: [] })}
+                          className="mt-2 text-purple-600 hover:text-purple-800 font-medium"
+                        >
+                          Clear filters
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <VendorGallery 
+                onSelectVendor={handleSelectVendor} 
+                activeFilters={filters}
+              />
+            )}
+          </div>
         )}
       </div>
 

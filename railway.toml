@@ -1,0 +1,22 @@
+# Railway deployment configuration
+# https://railway.app
+#
+# Deploy in 3 steps:
+#   1. Push this repo to GitHub
+#   2. Go to https://railway.app → New Project → Deploy from GitHub repo
+#   3. Add the environment variables listed in .env.example
+#      (DATABASE_URL and PUBLIC_URL are the only required ones)
+
+[build]
+builder = "nixpacks"
+buildCommand = "npm ci && npm run build"
+
+[deploy]
+startCommand = "npm run start:prod"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[environment]
+NODE_ENV = "production"
