@@ -9,4 +9,4 @@ cmds = ["npm ci --ignore-scripts"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "npm run start:prod"
+cmd = "npm run release"

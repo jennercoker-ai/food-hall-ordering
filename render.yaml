@@ -12,7 +12,7 @@ services:
     name: food-hall-ordering
     runtime: node
     buildCommand: npm ci && npm run build
-    startCommand: npm run start:prod
+    startCommand: npm run release
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV

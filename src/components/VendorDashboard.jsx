@@ -14,13 +14,15 @@ function VendorDashboard({ vendorId }) {
   const [loading, setLoading] = useState(true);
 
   const fetchOrders = async () => {
+    if (!vendorId) return;
     try {
       setLoading(true);
       const response = await fetch(`${API_URL}/api/vendors/${vendorId}/orders`);
       const data = await response.json();
-      setOrders(data);
+      setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to fetch orders:', error);
+      setOrders([]);
     } finally {
       setLoading(false);
     }
@@ -79,13 +81,13 @@ function VendorDashboard({ vendorId }) {
     if (filter === 'active') {
       return ['pending', 'confirmed', 'preparing'].includes(order.status);
     } else if (filter === 'completed') {
-      return ['ready', 'completed'].includes(order.status);
+      return ['ready', 'completed'].includes(String(order.status || '').toLowerCase());
     }
     return true;
   });
 
-  const activeCount = orders.filter(o => ['pending', 'confirmed', 'preparing'].includes(o.status)).length;
-  const readyCount = orders.filter(o => o.status === 'ready').length;
+  const activeCount = orders.filter(o => ['pending', 'confirmed', 'preparing'].includes(String(o.status || '').toLowerCase())).length;
+  const readyCount = orders.filter(o => ['ready', 'completed'].includes(String(o.status || '').toLowerCase())).length;
 
   return (
     <div className="min-h-screen bg-gray-100">

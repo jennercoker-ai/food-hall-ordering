@@ -28,16 +28,16 @@ function OrderConfirmation({ orderId }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-        <div className="text-white text-2xl font-bold">Loading order...</div>
+      <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center safe-y safe-x">
+        <div className="text-white text-xl sm:text-2xl font-bold">Loading order...</div>
       </div>
     );
   }
 
   if (!order) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-        <div className="bg-white rounded-2xl p-8 max-w-md text-center">
+      <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center p-4 safe-y safe-x">
+        <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full text-center">
           <div className="text-6xl mb-4">❌</div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">Order Not Found</h2>
           <p className="text-gray-600">We couldn't find this order. Please check your order number.</p>
@@ -98,15 +98,15 @@ function OrderConfirmation({ orderId }) {
   const currentStatus = statusConfig[order.status] || statusConfig.pending;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-500 via-pink-500 to-red-500 p-4">
-      <div className="max-w-2xl mx-auto pt-8">
+    <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-purple-500 via-pink-500 to-red-500 p-3 sm:p-4 safe-y safe-x">
+      <div className="max-w-2xl mx-auto pt-4 sm:pt-8">
         {/* Order Status Card */}
-        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden mb-6">
-          <div className={`p-8 border-b-4 ${currentStatus.color}`}>
+        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden mb-4 sm:mb-6">
+          <div className={`p-6 sm:p-8 border-b-4 ${currentStatus.color}`}>
             <div className="text-center">
-              <div className="text-7xl mb-4">{currentStatus.icon}</div>
-              <h1 className="text-3xl font-bold mb-2">{currentStatus.title}</h1>
-              <p className="text-lg mb-4">{currentStatus.description}</p>
+              <div className="text-6xl sm:text-7xl mb-3 sm:mb-4">{currentStatus.icon}</div>
+              <h1 className="text-2xl sm:text-3xl font-bold mb-2">{currentStatus.title}</h1>
+              <p className="text-base sm:text-lg mb-4">{currentStatus.description}</p>
               <div className="flex items-center justify-center gap-3 flex-wrap">
                 <div className="inline-block bg-white bg-opacity-50 px-6 py-3 rounded-full">
                   <span className="text-sm font-semibold">Order #{order.orderNumber}</span>
@@ -122,11 +122,11 @@ function OrderConfirmation({ orderId }) {
           </div>
 
           {/* Order Details */}
-          <div className="p-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Order Details</h2>
+          <div className="p-4 sm:p-6">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-4">Order Details</h2>
             
             <div className="space-y-3">
-              {order.items.map((item, idx) => (
+              {(order.items || []).map((item, idx) => (
                 <div key={idx} className="flex justify-between items-center py-3 border-b border-gray-200">
                   <div className="flex-1">
                     <p className="font-semibold text-gray-800">{item.name}</p>

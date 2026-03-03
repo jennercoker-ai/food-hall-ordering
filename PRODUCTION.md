@@ -65,7 +65,7 @@ The server:
 |----------|----------|-------------|
 | `NODE_ENV` | Set to `production` | Enables static serving and default port 3000 |
 | `PORT` | No (default 3000) | Server port |
-| `DATABASE_URL` | Optional | For Prisma / `POST /api/handoff` |
+| `DATABASE_URL` | **Yes for KDS** | Postgres connection for Prisma. Required for orders to appear on Kitchen Display (KDS), vendor screens, and central board. Run `npx prisma migrate deploy` (and seed if needed) before start. |
 | `TWILIO_*` | Optional | For SMS notifications |
 | `VITE_API_URL` | No | Set in `.env.production` to empty for same-origin |
 
@@ -76,13 +76,14 @@ The server:
 1. Set **NODE_ENV=production**.
 2. Set **PORT** to the platform’s port (often from `process.env.PORT`).
 3. Build: run **npm run build** in the build step.
-4. Start: run **npm run start:prod** (or `node server/index.js` with `NODE_ENV=production`).
-5. Ensure the platform allows **WebSocket** on the same host/port.
+4. Start: use **npm run release** (runs migrations when DATABASE_URL is set, then starts the app).
+5. Set **DATABASE_URL** (Postgres) so the KDS and vendor/central views show persisted orders.
+6. Ensure the platform allows **WebSocket** on the same host/port.
 
-Example (Railway/Render):
+### Railway (configured in this repo)
 
-- Build command: `npm install && npm run build`
-- Start command: `npm run start:prod`
+- **railway.toml** and **Dockerfile** use start command **npm run release**.
+- Steps: (1) Deploy from GitHub. (2) Add Postgres plugin or set DATABASE_URL. (3) Set PUBLIC_URL to your app URL. (4) Optionally run **npm run db:seed** once (Shell) to seed vendors and menu.
 
 ---
 

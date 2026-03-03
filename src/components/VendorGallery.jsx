@@ -84,7 +84,7 @@ export default function VendorGallery({ onSelectVendor, activeFilters = {} }) {
       <div className="p-4">
         <div className="animate-pulse">
           <div className="h-8 bg-gray-200 rounded w-48 mb-4"></div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
             {[1, 2, 3, 4, 5, 6].map(i => (
               <div key={i} className="rounded-xl overflow-hidden">
                 <div className="h-32 bg-gray-200"></div>
@@ -115,56 +115,57 @@ export default function VendorGallery({ onSelectVendor, activeFilters = {} }) {
   }
 
   return (
-    <div className="p-4">
-      <h2 className="text-xl font-bold mb-4 text-gray-800">Explore Food Hall</h2>
-      
+    <div className="p-0 sm:p-2 md:p-4">
+      <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-gray-800 px-0 sm:px-2">Explore Food Hall</h2>
+
       {filteredVendors.length === 0 ? (
         <div className="text-center py-8 text-gray-500">
           <p>No vendors match your filters</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:gap-3 md:gap-4 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {filteredVendors.map((vendor) => {
             const emoji = cuisineImages[vendor.cuisine] || cuisineImages.default;
             const time = estimatedTimes[vendor.cuisine] || estimatedTimes.default;
             const logoUrl = vendorLogos[vendor.name] || vendor.imageUrl;
-            
+
             return (
-              <div 
-                key={vendor.id} 
+              <button
+                type="button"
+                key={vendor.id}
                 onClick={() => onSelectVendor(vendor.id)}
-                className="rounded-xl overflow-hidden shadow-sm border border-gray-100 cursor-pointer hover:shadow-lg hover:border-purple-300 hover:-translate-y-1 transition-all bg-white"
+                className="touch-target rounded-xl overflow-hidden shadow-sm border border-gray-100 cursor-pointer hover:shadow-lg active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 transition-all bg-white text-left w-full"
               >
                 {logoUrl ? (
-                  <div className="h-36 w-full bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
-                    <img 
-                      src={logoUrl} 
-                      alt={vendor.name} 
+                  <div className="h-28 sm:h-32 md:h-36 w-full bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-3 sm:p-4">
+                    <img
+                      src={logoUrl}
+                      alt={vendor.name}
                       className="max-h-full max-w-full object-contain"
                       onError={(e) => {
-                        e.target.parentElement.innerHTML = `<span class="text-5xl">${emoji}</span>`;
+                        e.target.parentElement.innerHTML = `<span class="text-4xl sm:text-5xl">${emoji}</span>`;
                       }}
                     />
                   </div>
                 ) : (
-                  <div className="h-36 w-full bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center text-5xl">
+                  <div className="h-28 sm:h-32 md:h-36 w-full bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center text-4xl sm:text-5xl">
                     {emoji}
                   </div>
                 )}
-                
-                <div className="p-3 border-t border-gray-100">
-                  <h3 className="font-bold text-sm text-gray-800 truncate">{vendor.name}</h3>
-                  <div className="flex justify-between items-center text-xs text-gray-500 mt-1.5">
-                    <span className="flex items-center gap-1">
-                      <span>{emoji}</span>
-                      <span>{vendor.cuisine || 'Various'}</span>
+
+                <div className="p-2 sm:p-3 border-t border-gray-100">
+                  <h3 className="font-bold text-xs sm:text-sm text-gray-800 truncate">{vendor.name}</h3>
+                  <div className="flex justify-between items-center text-xs text-gray-500 mt-1 sm:mt-1.5 gap-1">
+                    <span className="flex items-center gap-1 min-w-0 truncate">
+                      <span className="flex-shrink-0">{emoji}</span>
+                      <span className="truncate">{vendor.cuisine || 'Various'}</span>
                     </span>
-                    <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                    <span className="bg-green-100 text-green-700 px-1.5 sm:px-2 py-0.5 rounded-full font-medium flex-shrink-0">
                       {time}
                     </span>
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>

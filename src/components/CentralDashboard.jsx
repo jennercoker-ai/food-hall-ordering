@@ -16,27 +16,25 @@ function CentralDashboard() {
     try {
       setLoading(true);
       const params = new URLSearchParams();
-      if (filter === 'ready') {
-        params.set('status', 'ready');
-      } else if (filter === 'completed') {
+      if (filter === 'ready' || filter === 'completed') {
         params.set('status', 'completed');
-      } else if (filter === 'active') {
-        // active = pending, confirmed, preparing
-        // we'll fetch all and filter client-side
       }
 
       const url =
-        filter === 'active'
+        filter === 'active' || filter === 'all'
           ? `${API_URL}/api/orders`
           : `${API_URL}/api/orders?${params.toString()}`;
 
       const response = await fetch(url);
       let data = await response.json();
+      if (!Array.isArray(data)) data = [];
 
       if (filter === 'active') {
         data = data.filter(order =>
           ['pending', 'confirmed', 'preparing'].includes(order.status)
         );
+      } else if (filter === 'all') {
+        // already have full list
       }
 
       setOrders(data);
@@ -64,7 +62,7 @@ function CentralDashboard() {
   const activeCount = orders.filter(o =>
     ['pending', 'confirmed', 'preparing'].includes(o.status)
   ).length;
-  const readyCount = orders.filter(o => o.status === 'ready').length;
+  const readyCount = orders.filter(o => o.status === 'completed').length;
 
   return (
     <div className="min-h-screen bg-gray-100">

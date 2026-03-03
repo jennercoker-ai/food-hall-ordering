@@ -36,4 +36,5 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["node", "server/index.js"]
+# Run migrations then start (set DATABASE_URL in production)
+CMD ["sh", "-c", "npm run release"]

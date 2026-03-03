@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+const getWsBase = () => {
+  const base = API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+  return base.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
+};
 
 const statusColors = {
   RECEIVED: 'border-yellow-500',
@@ -69,7 +73,7 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
   useEffect(() => {
     if (!vendorId) return;
 
-    const ws = new WebSocket(`${API_URL.replace('http', 'ws')}?vendorId=${vendorId}`);
+    const ws = new WebSocket(`${getWsBase().replace(/\/$/, '')}?vendorId=${vendorId}`);
     
     ws.onopen = () => {
       setIsConnected(true);
@@ -220,74 +224,66 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
 
   if (isLoading) {
     return (
-      <div className="bg-slate-900 min-h-screen flex items-center justify-center">
-        <div className="text-white text-xl">Loading Kitchen Display...</div>
+      <div className="bg-slate-900 min-h-screen min-h-[100dvh] flex items-center justify-center safe-y">
+        <div className="text-white text-lg sm:text-xl">Loading Kitchen Display...</div>
       </div>
     );
   }
 
   return (
-    <div className="bg-slate-900 min-h-screen text-white font-mono">
-      {/* Header */}
-      <div className="bg-slate-800 border-b border-slate-700 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold">
-              🍳 KITCHEN DISPLAY
+    <div className="bg-slate-900 min-h-screen min-h-[100dvh] text-white font-mono safe-top">
+      {/* Header — stacks on mobile, row on tablet+ */}
+      <div className="bg-slate-800 border-b border-slate-700 px-3 sm:px-6 py-3 sm:py-4 safe-x">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
+            <h1 className="text-lg sm:text-2xl font-bold whitespace-nowrap">
+              🍳 KDS
             </h1>
-            <span className="text-slate-400">|</span>
-            <span className="text-xl text-orange-400 font-bold">
+            <span className="text-slate-400 hidden sm:inline">|</span>
+            <span className="text-base sm:text-xl text-orange-400 font-bold truncate">
               {vendor?.name || 'Loading...'}
             </span>
             {vendor?.collectionPoint && (
-              <span className="bg-slate-700 px-3 py-1 rounded text-sm">
+              <span className="bg-slate-700 px-2 sm:px-3 py-1 rounded text-xs sm:text-sm">
                 📍 {vendor.collectionPoint}
               </span>
             )}
           </div>
-          
-          <div className="flex items-center gap-4">
-            {/* Connection Status */}
-            <div className={`flex items-center gap-2 px-3 py-1 rounded ${isConnected ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'}`}>
-              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></span>
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className={`flex items-center gap-2 px-2 sm:px-3 py-1 rounded text-xs sm:text-sm ${isConnected ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'}`}>
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></span>
               {isConnected ? 'LIVE' : 'OFFLINE'}
             </div>
-            
-            {/* Current Time */}
-            <div className="text-slate-400">
+            <div className="text-slate-400 text-sm sm:text-base">
               {new Date().toLocaleTimeString()}
             </div>
           </div>
         </div>
-        
-        {/* Stats Bar */}
-        <div className="flex items-center gap-6 mt-4">
+        {/* Stats + Filter — wrap on small screens */}
+        <div className="flex flex-wrap items-center gap-3 sm:gap-6 mt-3 sm:mt-4">
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-yellow-500"></span>
+            <span className="w-3 h-3 rounded-full bg-yellow-500 flex-shrink-0"></span>
             <span className="text-yellow-500 font-bold">{stats.newOrders}</span>
             <span className="text-slate-400 text-sm">New</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-orange-500"></span>
+            <span className="w-3 h-3 rounded-full bg-orange-500 flex-shrink-0"></span>
             <span className="text-orange-500 font-bold">{stats.cooking}</span>
             <span className="text-slate-400 text-sm">Cooking</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-green-500"></span>
+            <span className="w-3 h-3 rounded-full bg-green-500 flex-shrink-0"></span>
             <span className="text-green-500 font-bold">{stats.ready}</span>
             <span className="text-slate-400 text-sm">Ready</span>
           </div>
-          
-          {/* Filter Tabs */}
-          <div className="ml-auto flex bg-slate-700 rounded-lg p-1">
+          <div className="flex bg-slate-700 rounded-lg p-1 ml-0 sm:ml-auto">
             {['active', 'ready', 'all'].map(f => (
               <button
+                type="button"
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`px-4 py-1 rounded text-sm font-medium transition ${
-                  filter === f 
-                    ? 'bg-slate-600 text-white' 
-                    : 'text-slate-400 hover:text-white'
+                className={`touch-target px-3 sm:px-4 py-2 sm:py-1 rounded text-sm font-medium transition ${
+                  filter === f ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 {f.charAt(0).toUpperCase() + f.slice(1)}
@@ -297,8 +293,8 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
         </div>
       </div>
 
-      {/* Orders Grid */}
-      <div className="p-6">
+      {/* Orders Grid — 1 col mobile, 2 tablet, 3–4 desktop */}
+      <div className="p-3 sm:p-6 safe-x safe-bottom">
         {Object.keys(itemsByOrder).length === 0 ? (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">✨</div>
@@ -306,7 +302,7 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
             <p className="text-slate-500 mt-2">New orders will appear here automatically</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
             {Object.values(itemsByOrder).map((order) => (
               <div 
                 key={order.orderId}
@@ -356,30 +352,31 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
                         </p>
                       )}
                       
-                      {/* Action Buttons */}
-                      <div className="flex gap-2 mt-3">
+                      {/* Action Buttons — touch-friendly on tablet/mobile */}
+                      <div className="flex flex-wrap gap-2 mt-3">
                         {item.status === 'RECEIVED' && (
                           <button
+                            type="button"
                             onClick={() => markAsPreparing(item.id)}
-                            className="flex-1 bg-orange-600 hover:bg-orange-500 py-2 rounded font-bold transition text-sm"
+                            className="touch-target flex-1 min-w-0 bg-orange-600 hover:bg-orange-500 active:bg-orange-700 py-3 sm:py-2 rounded font-bold transition text-sm"
                           >
                             🍳 START
                           </button>
                         )}
-                        
                         {(item.status === 'RECEIVED' || item.status === 'PREPARING') && (
                           <button
+                            type="button"
                             onClick={() => markAsReady(item.id)}
-                            className="flex-1 bg-green-600 hover:bg-green-500 py-2 rounded font-bold transition text-sm"
+                            className="touch-target flex-1 min-w-0 bg-green-600 hover:bg-green-500 active:bg-green-700 py-3 sm:py-2 rounded font-bold transition text-sm"
                           >
                             ✅ READY
                           </button>
                         )}
-                        
                         {item.status === 'READY' && (
                           <button
+                            type="button"
                             onClick={() => markAsCollected(item.id)}
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded font-bold transition text-sm"
+                            className="touch-target flex-1 min-w-0 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 sm:py-2 rounded font-bold transition text-sm"
                           >
                             🎉 COLLECTED
                           </button>

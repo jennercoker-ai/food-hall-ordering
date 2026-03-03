@@ -17,6 +17,8 @@ function GroupCart({ onClose, onCheckout }) {
   const [tableNumber, setTableNumber] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [showOrderTypeModal, setShowOrderTypeModal] = useState(false);
+  const [checkoutError, setCheckoutError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const deliveryFee = orderType === 'DELIVERY' ? 2.50 : 0;
   
@@ -67,20 +69,28 @@ function GroupCart({ onClose, onCheckout }) {
     setShowPaymentConfirm(true);
   };
   
-  const confirmPayment = (method) => {
+  const confirmPayment = async (method) => {
     const orderData = prepareOrderData();
     orderData.paymentMethod = method;
     orderData.orderType = orderType;
     orderData.tableNumber = orderType === 'DINE_IN' ? tableNumber : undefined;
     orderData.deliveryAddress = orderType === 'DELIVERY' ? deliveryAddress : undefined;
     orderData.deliveryFee = deliveryFee;
-    if (onCheckout) {
-      onCheckout(orderData);
+    setCheckoutError(null);
+    setIsSubmitting(true);
+    try {
+      if (onCheckout) {
+        await Promise.resolve(onCheckout(orderData));
+      }
+      setShowPaymentConfirm(false);
+      setShowCashConfirm(false);
+      setShowOrderTypeModal(false);
+      setPaymentMethod(null);
+    } catch (e) {
+      setCheckoutError(e.message || 'Failed to submit order');
+    } finally {
+      setIsSubmitting(false);
     }
-    setShowPaymentConfirm(false);
-    setShowCashConfirm(false);
-    setShowOrderTypeModal(false);
-    setPaymentMethod(null);
   };
   
   const handleCashPayment = () => {
@@ -449,22 +459,30 @@ function GroupCart({ onClose, onCheckout }) {
                 </div>
               </div>
               
+              {checkoutError && (
+                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                  {checkoutError}
+                </div>
+              )}
               <div className="space-y-2">
                 <button
                   onClick={() => confirmPayment('apple_pay')}
-                  className="w-full py-3 bg-black text-white rounded-xl font-semibold flex items-center justify-center gap-2"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-black text-white rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                   Pay with Apple Pay
+                  {isSubmitting ? 'Submitting…' : ' Pay with Apple Pay'}
                 </button>
                 <button
                   onClick={() => confirmPayment('card')}
-                  className="w-full py-3 bg-white border-2 border-gray-200 text-gray-800 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-gray-50"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-white border-2 border-gray-200 text-gray-800 rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-gray-50 disabled:opacity-50"
                 >
                   💳 Pay with Card
                 </button>
                 <button
                   onClick={handleCashPayment}
-                  className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:from-green-600 hover:to-emerald-700"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:from-green-600 hover:to-emerald-700 disabled:opacity-50"
                 >
                   💵 Pay with Cash
                 </button>
@@ -524,19 +542,27 @@ function GroupCart({ onClose, onCheckout }) {
                 </div>
               </div>
               
+              {checkoutError && (
+                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                  {checkoutError}
+                </div>
+              )}
               <div className="space-y-2">
                 <button
                   onClick={() => confirmPayment('cash')}
-                  className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  ✓ Confirm Cash Payment
+                  {isSubmitting ? 'Submitting…' : '✓ Confirm Cash Payment'}
                 </button>
                 <button
                   onClick={() => {
                     setShowCashConfirm(false);
                     setPaymentMethod(null);
+                    setCheckoutError(null);
                   }}
-                  className="w-full py-2 text-gray-500 text-sm"
+                  disabled={isSubmitting}
+                  className="w-full py-2 text-gray-500 text-sm disabled:opacity-50"
                 >
                   Back to payment options
                 </button>

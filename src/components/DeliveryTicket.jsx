@@ -69,7 +69,7 @@ function DeliveryTicket({ deliveryId }) {
             </div>
             <p className="mb-4">GUEST: {delivery.guestName} (Host)</p>
             <div className="space-y-4">
-              {delivery.vendors.map((v) => (
+              {(delivery.vendors || []).map((v) => (
                 <div key={v.vendorId}>
                   <p>[ ] {v.vendorName}</p>
                   <ul className="ml-4 list-none space-y-1">

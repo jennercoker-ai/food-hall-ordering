@@ -64,22 +64,24 @@ export default function FilterBar({ filters, onFilterChange }) {
     (filters.excludeAllergens?.length || 0);
 
   return (
-    <div className="bg-white border-b border-gray-200">
-      {/* Search Bar */}
-      <div className="p-3">
+    <div className="bg-white border-b border-gray-200 safe-x">
+      {/* Search Bar — touch-friendly height on mobile */}
+      <div className="p-2 sm:p-3">
         <div className="relative">
           <input
             type="text"
             value={filters.search || ''}
             onChange={handleSearchChange}
             placeholder="Search vendors or dishes..."
-            className="w-full pl-10 pr-4 py-2.5 bg-gray-100 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+            className="w-full pl-10 pr-10 py-3 sm:py-2.5 bg-gray-100 rounded-full text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
           />
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">🔍</span>
           {filters.search && (
             <button
+              type="button"
               onClick={() => onFilterChange({ ...filters, search: '' })}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              className="touch-target absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 rounded-full p-1"
+              aria-label="Clear search"
             >
               ✕
             </button>
@@ -87,17 +89,18 @@ export default function FilterBar({ filters, onFilterChange }) {
         </div>
       </div>
 
-      {/* Cuisine Pills (horizontal scroll) */}
-      <div className="px-3 pb-2 overflow-x-auto scrollbar-hide">
+      {/* Cuisine Pills — horizontal scroll on mobile/tablet */}
+      <div className="px-2 sm:px-3 pb-2 overflow-x-auto scrollbar-hide -webkit-overflow-scrolling-touch">
         <div className="flex gap-2 min-w-max">
           {cuisineOptions.map((option) => (
             <button
+              type="button"
               key={option.value}
               onClick={() => handleCuisineChange(option.value)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+              className={`touch-target flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all flex-shrink-0 ${
                 filters.cuisine === option.value
                   ? 'bg-purple-600 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'
               }`}
             >
               <span>{option.icon}</span>
@@ -108,28 +111,30 @@ export default function FilterBar({ filters, onFilterChange }) {
       </div>
 
       {/* Filter Toggle Button */}
-      <div className="px-3 pb-3 flex items-center gap-2">
+      <div className="px-2 sm:px-3 pb-3 flex items-center gap-2 flex-wrap">
         <button
+          type="button"
           onClick={() => setShowFilters(!showFilters)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+          className={`touch-target flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-full text-sm font-medium transition-all ${
             activeFilterCount > 0
               ? 'bg-purple-100 text-purple-700 border border-purple-300'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
           }`}
         >
           <span>⚙️</span>
-          <span>Dietary & Allergens</span>
+          <span className="hidden xs:inline">Dietary & Allergens</span>
+          <span className="xs:hidden">Filters</span>
           {activeFilterCount > 0 && (
             <span className="bg-purple-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
               {activeFilterCount}
             </span>
           )}
         </button>
-        
         {activeFilterCount > 0 && (
           <button
+            type="button"
             onClick={clearFilters}
-            className="text-sm text-purple-600 hover:text-purple-800 font-medium"
+            className="touch-target text-sm text-purple-600 hover:text-purple-800 font-medium py-2"
           >
             Clear all
           </button>
@@ -139,7 +144,6 @@ export default function FilterBar({ filters, onFilterChange }) {
       {/* Expanded Filters Panel */}
       {showFilters && (
         <div className="px-3 pb-4 border-t border-gray-100 pt-3 space-y-4">
-          {/* Dietary Preferences */}
           <div>
             <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Dietary Preferences
@@ -147,9 +151,10 @@ export default function FilterBar({ filters, onFilterChange }) {
             <div className="flex flex-wrap gap-2">
               {dietaryOptions.map((option) => (
                 <button
+                  type="button"
                   key={option.value}
                   onClick={() => handleDietaryToggle(option.value)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  className={`touch-target flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium transition-all ${
                     filters.dietary?.includes(option.value)
                       ? 'bg-green-500 text-white shadow-md'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -161,8 +166,6 @@ export default function FilterBar({ filters, onFilterChange }) {
               ))}
             </div>
           </div>
-
-          {/* Allergen Exclusions */}
           <div>
             <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Exclude Allergens
@@ -170,9 +173,10 @@ export default function FilterBar({ filters, onFilterChange }) {
             <div className="flex flex-wrap gap-2">
               {allergenOptions.map((option) => (
                 <button
+                  type="button"
                   key={option.value}
                   onClick={() => handleAllergenToggle(option.value)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  className={`touch-target flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium transition-all ${
                     filters.excludeAllergens?.includes(option.value)
                       ? 'bg-red-500 text-white shadow-md'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'

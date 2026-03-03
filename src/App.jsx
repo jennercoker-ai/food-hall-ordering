@@ -72,8 +72,8 @@ function App() {
 
   if (view === 'loading') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-        <div className="text-white text-2xl font-bold">Loading...</div>
+      <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center safe-y safe-x">
+        <div className="text-white text-xl sm:text-2xl font-bold">Loading...</div>
       </div>
     );
   }
@@ -137,9 +137,15 @@ function App() {
   if (view === 'family') {
     return (
       <GroupOrderInterface 
-        onOrderComplete={(orderData) => {
-          console.log('Family order completed:', orderData);
-          setView('confirmation');
+        onOrderComplete={(result) => {
+          if (result?.deliveryId) {
+            setDeliveryId(result.deliveryId);
+            setOrderId(result.orders?.[0]?.id || null);
+            setView('delivery');
+          } else {
+            setOrderId(result?.id || result?.orders?.[0]?.id || null);
+            setView('confirmation');
+          }
         }}
       />
     );

@@ -17,7 +17,7 @@ export async function GET(req: Request, { params }: { params: { vendorId: string
   const items = await prisma.orderItem.findMany({
     where,
     include: {
-      order: { select: { id: true, customerPhone: true, specialInstructions: true, groupId: true, createdAt: true, orderType: true, tableNumber: true } },
+      order: { select: { id: true, orderNumber: true, customerPhone: true, specialInstructions: true, groupId: true, createdAt: true, orderType: true, tableNumber: true } },
       menuItem: { select: { id: true, name: true, price: true, category: true } },
       vendor: { select: { id: true, name: true, collectionPoint: true } },
     },
@@ -27,7 +27,7 @@ export async function GET(req: Request, { params }: { params: { vendorId: string
   return NextResponse.json(
     items.map((item) => ({
       ...item,
-      orderNumber: item.orderId.slice(-4).toUpperCase(),
+      orderNumber: String(item.order?.orderNumber ?? item.orderId.slice(-4)).toUpperCase(),
       name: item.menuItem?.name ?? '—',
     })),
   );

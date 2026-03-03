@@ -1127,42 +1127,50 @@ app.post('/api/handoff', async (req, res) => {
   }
 });
 
-// Create order
-app.post('/api/orders', (req, res) => {
-  const { 
-    sessionId, 
-    items, 
-    customerPhone, 
-    specialInstructions, 
-    destination, 
+// Create order (session-based or session-less for group/family orders)
+app.post('/api/orders', async (req, res) => {
+  const {
+    sessionId,
+    items,
+    customerPhone,
+    specialInstructions,
+    destination,
     guestName,
     orderType = 'DINE_IN',
     tableNumber,
-    deliveryFee = 0
+    deliveryFee = 0,
+    groupId: bodyGroupId
   } = req.body;
-  
-  const session = database.sessions.get(sessionId);
-  
-  if (!session) {
-    return res.status(404).json({ error: 'Session not found' });
+
+  const session = sessionId ? database.sessions.get(sessionId) : null;
+  const isGroupOrder = Boolean(bodyGroupId);
+
+  // Allow creation without session when items + (customerPhone or groupId) are present (e.g. family/group checkout)
+  if (!session && (!items || !Array.isArray(items) || items.length === 0)) {
+    return res.status(400).json({ error: 'Items required' });
   }
-  
-  // Group items by vendor for multi-vendor orders
+  if (!session && !customerPhone && !bodyGroupId) {
+    return res.status(400).json({ error: 'Session not found or provide customerPhone/groupId' });
+  }
+
+  // Group items by vendor
   const itemsByVendor = {};
-  items.forEach(item => {
-    const vendorId = item.vendorId || session.vendorId;
-    if (!itemsByVendor[vendorId]) {
-      itemsByVendor[vendorId] = [];
-    }
+  (items || []).forEach(item => {
+    const vendorId = item.vendorId || (session && session.vendorId);
+    if (!vendorId) return;
+    if (!itemsByVendor[vendorId]) itemsByVendor[vendorId] = [];
     itemsByVendor[vendorId].push(item);
   });
-  
+
   const vendorIds = Object.keys(itemsByVendor);
+  if (vendorIds.length === 0) {
+    return res.status(400).json({ error: 'No valid items with vendor' });
+  }
+
   const isMultiVendor = vendorIds.length > 1;
-  // Create delivery ticket for multi-vendor orders OR if orderType is DELIVERY
   const needsDeliveryTicket = isMultiVendor || orderType === 'DELIVERY';
   const deliveryId = needsDeliveryTicket ? 'DH-' + (1000 + Math.floor(Math.random() * 9000)) : null;
-  
+
   if (deliveryId) {
     database.deliveries.set(deliveryId, {
       deliveryId,
@@ -1170,77 +1178,146 @@ app.post('/api/orders', (req, res) => {
       destination: destination || '',
       guestName: guestName || '',
       orderType,
-      status: 'pending', // pending | dispatched | delivered
+      status: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
   }
-  
-  // Create separate orders for each vendor
+
   const orders = [];
-  vendorIds.forEach(vendorId => {
+  for (let i = 0; i < vendorIds.length; i++) {
+    const vendorId = vendorIds[i];
     const rawItems = itemsByVendor[vendorId];
-    const menu = database.menus.get(vendorId) || [];
+    let menu = database.menus.get(vendorId) || [];
+    if (menu.length === 0 && prisma) {
+      try {
+        const prismaMenu = await prisma.menuItem.findMany({
+          where: { vendorId, available: true },
+          select: { id: true, name: true, price: true, allergens: true, dietary: true }
+        });
+        menu = prismaMenu;
+      } catch (_) {}
+    }
     const menuById = new Map(menu.map(m => [m.id, m]));
     const vendorItems = rawItems.map(item => {
       const menuItem = menuById.get(item.id) || {};
       return {
         ...item,
-        allergens: menuItem.allergens || [],
-        dietary: menuItem.dietary || []
+        name: item.name || menuItem.name,
+        allergens: menuItem.allergens || item.allergens || [],
+        dietary: menuItem.dietary || item.dietary || []
       };
     });
-    const orderId = uuidv4();
+
     const orderNumber = Math.floor(100 + Math.random() * 900);
     const itemsTotal = vendorItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    // Add delivery fee only to first order to avoid double-counting
     const isFirstOrder = orders.length === 0;
-    const total = itemsTotal + (isFirstOrder && orderType === 'DELIVERY' ? deliveryFee : 0);
-    const vendor = database.vendors.get(vendorId);
-    const vendorName = vendor ? vendor.name : vendorId;
-    
+    const total = itemsTotal + (isFirstOrder && orderType === 'DELIVERY' ? Number(deliveryFee) || 0 : 0);
+    let vendorName = vendorId;
+    try {
+      if (prisma) {
+        const v = await prisma.vendor.findUnique({ where: { id: vendorId } });
+        if (v) vendorName = v.name;
+      } else {
+        const v = database.vendors.get(vendorId);
+        if (v) vendorName = v.name;
+      }
+    } catch (_) {}
+
+    // Persist to Prisma so KDS and vendor screens see the order
+    let createdOrderId = uuidv4();
+    if (prisma) {
+      try {
+        const orderItemsData = [];
+        for (const it of vendorItems) {
+          const menuItemId = it.id;
+          if (!menuItemId || !vendorId) continue;
+          const qty = Math.max(1, parseInt(it.quantity, 10) || 1);
+          const price = Number(it.price);
+          if (!Number.isFinite(price)) continue;
+          orderItemsData.push({
+            menuItemId,
+            vendorId,
+            quantity: qty,
+            price,
+            guestName: it.guestName || guestName || null,
+            status: 'RECEIVED'
+          });
+        }
+        if (orderItemsData.length > 0) {
+          const prismaOrder = await prisma.order.create({
+            data: {
+              orderNumber,
+              orderType: orderType === 'DINE_IN' ? 'DINE_IN' : orderType === 'DELIVERY' ? 'DELIVERY' : 'COLLECTION',
+              status: 'PENDING',
+              totalAmount: total,
+              groupId: bodyGroupId || null,
+              tableNumber: tableNumber || null,
+              deliveryAddress: orderType === 'DELIVERY' ? (destination || null) : null,
+              deliveryFee: isFirstOrder ? (Number(deliveryFee) || 0) : 0,
+              customerPhone: customerPhone || null,
+              customerName: guestName || null,
+              specialInstructions: specialInstructions || null,
+              vendorId,
+              items: { create: orderItemsData }
+            },
+            include: {
+              items: {
+                include: {
+                  menuItem: true,
+                  vendor: true
+                }
+              }
+            }
+          });
+          createdOrderId = prismaOrder.id;
+        }
+      } catch (e) {
+        console.error('Prisma order create error:', e);
+      }
+    }
+
     const order = {
-      id: orderId,
+      id: createdOrderId,
       orderNumber,
       vendorId,
       vendorName,
       deliveryId,
-      items: vendorItems,
+      items: vendorItems.map(it => ({ ...it, status: it.status || 'RECEIVED' })),
       total,
       itemsTotal,
-      deliveryFee: isFirstOrder ? deliveryFee : 0,
-      customerPhone,
-      specialInstructions,
+      deliveryFee: isFirstOrder ? (Number(deliveryFee) || 0) : 0,
+      customerPhone: customerPhone || null,
+      specialInstructions: specialInstructions || null,
       destination: destination || null,
       guestName: guestName || null,
       orderType,
       tableNumber: tableNumber || null,
+      groupId: bodyGroupId || null,
       status: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    
-    database.orders.set(orderId, order);
+
+    database.orders.set(createdOrderId, order);
     orders.push(order);
-    
+
     if (deliveryId) {
       const d = database.deliveries.get(deliveryId);
-      d.orderIds.push(orderId);
+      d.orderIds.push(createdOrderId);
+      if (customerPhone && !d.customerPhone) d.customerPhone = customerPhone;
+      if (destination && !d.destination) d.destination = destination;
     }
-    
-    // Notify vendor via WebSocket
+
     notifyVendor(vendorId, order);
-    // Notify central order board
     notifyCentral(order, 'NEW_ORDER');
 
-    // Send SMS notification for order received
     if (customerPhone) {
       const message = getStatusMessage(order, 'pending');
       sendSMS(customerPhone, message);
     }
-  });
-  
-  // Return the first order (or all orders + deliveryId if multiple)
+  }
+
   if (orders.length === 1) {
     res.json(orders[0]);
   } else {
@@ -1252,15 +1329,59 @@ app.post('/api/orders', (req, res) => {
   }
 });
 
-// Get order
-app.get('/api/orders/:orderId', (req, res) => {
+// Get order (Prisma first so KDS-created orders are found, then in-memory)
+app.get('/api/orders/:orderId', async (req, res) => {
   const { orderId } = req.params;
+
+  if (prisma) {
+    try {
+      const dbOrder = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          items: { include: { menuItem: true, vendor: true } },
+          vendor: true
+        }
+      });
+      if (dbOrder) {
+        const formatted = {
+          id: dbOrder.id,
+          orderNumber: dbOrder.orderNumber,
+          vendorId: dbOrder.vendorId,
+          vendorName: dbOrder.vendor?.name || dbOrder.vendorId,
+          items: dbOrder.items.map(it => ({
+            id: it.id,
+            name: it.menuItem?.name || it.name,
+            quantity: it.quantity,
+            price: it.price,
+            status: it.status,
+            guestName: it.guestName,
+            vendorId: it.vendorId
+          })),
+          total: dbOrder.totalAmount,
+          itemsTotal: dbOrder.totalAmount - (dbOrder.deliveryFee || 0),
+          deliveryFee: dbOrder.deliveryFee || 0,
+          customerPhone: dbOrder.customerPhone,
+          specialInstructions: dbOrder.specialInstructions,
+          destination: dbOrder.deliveryAddress,
+          guestName: dbOrder.customerName,
+          orderType: dbOrder.orderType,
+          tableNumber: dbOrder.tableNumber,
+          groupId: dbOrder.groupId,
+          status: dbOrder.status.toLowerCase(),
+          createdAt: dbOrder.createdAt?.toISOString?.(),
+          updatedAt: dbOrder.updatedAt?.toISOString?.()
+        };
+        return res.json(formatted);
+      }
+    } catch (e) {
+      console.error('Error fetching order from Prisma:', e);
+    }
+  }
+
   const order = database.orders.get(orderId);
-  
   if (!order) {
     return res.status(404).json({ error: 'Order not found' });
   }
-  
   res.json(order);
 });
 
@@ -1542,20 +1663,24 @@ app.get('/api/delivery/:deliveryId/qr', (req, res) => {
   }
 });
 
+const VALID_ITEM_STATUSES = ['RECEIVED', 'PREPARING', 'READY', 'COLLECTED'];
+
 // Update individual order item status (for vendors marking items ready)
 app.patch('/api/order-items/:orderItemId/status', async (req, res) => {
   const { orderItemId } = req.params;
   const { status, vendorId } = req.body;
-  
+  const newStatus = (status && VALID_ITEM_STATUSES.includes(String(status).toUpperCase()))
+    ? String(status).toUpperCase()
+    : 'READY';
+
   if (!prisma) {
     return res.status(503).json({ error: 'Database not available' });
   }
-  
+
   try {
-    // Update the individual item in Prisma
     const updatedItem = await prisma.orderItem.update({
       where: { id: orderItemId },
-      data: { status: status || 'READY' },
+      data: { status: newStatus },
       include: { 
         order: true, 
         vendor: true,
@@ -1802,21 +1927,81 @@ app.patch('/api/orders/:orderId/status', (req, res) => {
   res.json(order);
 });
 
-// Get orders for vendor
-app.get('/api/vendors/:vendorId/orders', (req, res) => {
+// Resolve vendor id: map in-memory ids (vendor-001, etc.) to Prisma vendor id by name so dashboard shows orders
+const resolveVendorIdForOrders = async (vendorId) => {
+  if (!prisma) return vendorId;
+  const memVendor = database.vendors.get(vendorId);
+  if (memVendor && memVendor.name) {
+    const prismaVendor = await prisma.vendor.findFirst({
+      where: { name: memVendor.name },
+      select: { id: true }
+    });
+    if (prismaVendor) return prismaVendor.id;
+  }
+  return vendorId;
+};
+
+// Get orders for vendor (Prisma first so KDS-persisted orders appear)
+app.get('/api/vendors/:vendorId/orders', async (req, res) => {
   const { vendorId } = req.params;
   const { status } = req.query;
-  
-  let orders = Array.from(database.orders.values())
-    .filter(order => order.vendorId === vendorId);
-  
-  if (status) {
-    orders = orders.filter(order => order.status === status);
+  const resolvedVendorId = await resolveVendorIdForOrders(vendorId);
+
+  const formatOrder = (o) => ({
+    id: o.id,
+    orderNumber: o.orderNumber,
+    vendorId: o.vendorId,
+    vendorName: o.vendor?.name || o.vendorId,
+    items: o.items?.map(it => ({
+      id: it.id,
+      name: it.menuItem?.name || it.name,
+      quantity: it.quantity,
+      price: it.price,
+      status: it.status,
+      guestName: it.guestName,
+      vendorId: it.vendorId
+    })) || [],
+    total: o.totalAmount,
+    itemsTotal: o.totalAmount - (o.deliveryFee || 0),
+    deliveryFee: o.deliveryFee || 0,
+    customerPhone: o.customerPhone,
+    specialInstructions: o.specialInstructions,
+    destination: o.deliveryAddress,
+    guestName: o.customerName,
+    orderType: o.orderType,
+    tableNumber: o.tableNumber,
+    groupId: o.groupId,
+    status: (o.status || 'PENDING').toLowerCase(),
+    createdAt: o.createdAt?.toISOString?.() || o.createdAt,
+    updatedAt: o.updatedAt?.toISOString?.() || o.updatedAt
+  });
+
+  let orders = [];
+  if (prisma) {
+    try {
+      const where = { vendorId: resolvedVendorId };
+      if (status) where.status = status.toUpperCase();
+      const dbOrders = await prisma.order.findMany({
+        where,
+        include: {
+          items: { include: { menuItem: true, vendor: true } },
+          vendor: true
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+      orders = dbOrders.map(formatOrder);
+    } catch (e) {
+      console.error('Error fetching vendor orders from Prisma:', e);
+    }
   }
-  
-  // Sort by creation date (newest first)
-  orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  
+
+  let memOrders = Array.from(database.orders.values())
+    .filter(order => (order.vendorId === vendorId || order.vendorId === resolvedVendorId) && !orders.some(o => o.id === order.id));
+  if (status) {
+    memOrders = memOrders.filter(order => order.status === status);
+  }
+  orders = orders.concat(memOrders);
+  orders.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   res.json(orders);
 });
 
@@ -1824,28 +2009,23 @@ app.get('/api/vendors/:vendorId/orders', (req, res) => {
 app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
   const { vendorId } = req.params;
   const { status } = req.query;
-  
-  try {
-    if (prisma) {
-      // Use Prisma to get all order items for this vendor
-      const whereClause = {
-        vendorId: vendorId
-      };
-      
-      // Filter by status if provided, otherwise get active items
+
+  // Try Prisma first when available; on any error fall back to in-memory so KDS never 500s
+  if (prisma) {
+    try {
+      const whereClause = { vendorId };
       if (status) {
         whereClause.status = status;
       } else {
-        // Default: show items that aren't collected
         whereClause.status = { not: 'COLLECTED' };
       }
-      
       const orderItems = await prisma.orderItem.findMany({
         where: whereClause,
         include: {
           order: {
             select: {
               id: true,
+              orderNumber: true,
               customerPhone: true,
               specialInstructions: true,
               groupId: true,
@@ -1862,24 +2042,25 @@ app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
           }
         },
         orderBy: [
-          { status: 'asc' }, // RECEIVED first, then PREPARING, then READY
-          { order: { createdAt: 'asc' } } // Oldest orders first (FIFO)
+          { status: 'asc' },
+          { order: { createdAt: 'asc' } }
         ]
       });
-      
-      // Format response with order number (last 4 chars of orderId)
       const formattedItems = orderItems.map(item => ({
         ...item,
         orderId: item.orderId,
-        orderNumber: item.orderId.slice(-4).toUpperCase(),
+        orderNumber: String(item.order?.orderNumber ?? item.orderId?.slice(-4) ?? '').toUpperCase(),
         name: item.menuItem?.name || item.name,
         guestName: item.guestName
       }));
-      
       return res.json(formattedItems);
+    } catch (e) {
+      console.error('KDS order-items Prisma error (falling back to in-memory):', e.message || e);
     }
-    
-    // Fallback: use in-memory database
+  }
+
+  // In-memory fallback (or when Prisma unavailable)
+  try {
     let items = [];
     database.orders.forEach(order => {
       if (order.items) {
@@ -1887,17 +2068,19 @@ app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
           if (item.vendorId === vendorId || order.vendorId === vendorId) {
             items.push({
               ...item,
+              name: item.name || 'Item',
               orderId: order.id,
-              orderNumber: order.id.slice(-4).toUpperCase(),
+              orderNumber: (order.orderNumber != null ? String(order.orderNumber) : order.id.slice(-4)).toUpperCase(),
               order: {
                 id: order.id,
-                customerName: order.customerName,
+                orderNumber: order.orderNumber,
+                customerName: order.guestName || order.customerName,
                 customerPhone: order.customerPhone,
                 specialInstructions: order.specialInstructions,
                 groupId: order.groupId,
                 createdAt: order.createdAt
               },
-              status: item.status || 'RECEIVED'
+              status: (item.status || 'RECEIVED').toUpperCase()
             });
           }
         });
@@ -1916,9 +2099,10 @@ app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
     items.sort((a, b) => {
       const statusDiff = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
       if (statusDiff !== 0) return statusDiff;
-      return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      const aTime = (a.order && a.order.createdAt) || a.createdAt || 0;
+      const bTime = (b.order && b.order.createdAt) || b.createdAt || 0;
+      return new Date(aTime) - new Date(bTime);
     });
-    
     res.json(items);
   } catch (error) {
     console.error('Error fetching vendor order items:', error);
@@ -1926,26 +2110,83 @@ app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
   }
 });
 
-// Get all orders (for central dashboard); optional ?customerPhone= to filter by customer
-app.get('/api/orders', (req, res) => {
-  const { status, customerPhone } = req.query;
+// Get all orders (for central dashboard); optional ?customerPhone= ?groupId= ?status=
+app.get('/api/orders', async (req, res) => {
+  const { status, customerPhone, groupId } = req.query;
 
-  let orders = Array.from(database.orders.values()).map(order => ({
-    ...order,
-    vendorName: database.vendors.get(order.vendorId)?.name || order.vendorId
-  }));
+  const formatOrder = (o) => ({
+    id: o.id,
+    orderNumber: o.orderNumber,
+    vendorId: o.vendorId,
+    vendorName: o.vendor?.name || o.vendorId,
+    items: o.items?.map(it => ({
+      id: it.id,
+      name: it.menuItem?.name || it.name,
+      quantity: it.quantity,
+      price: it.price,
+      status: it.status,
+      guestName: it.guestName,
+      vendorId: it.vendorId
+    })) || [],
+    total: o.totalAmount,
+    itemsTotal: o.totalAmount - (o.deliveryFee || 0),
+    deliveryFee: o.deliveryFee || 0,
+    customerPhone: o.customerPhone,
+    specialInstructions: o.specialInstructions,
+    destination: o.deliveryAddress,
+    guestName: o.customerName,
+    orderType: o.orderType,
+    tableNumber: o.tableNumber,
+    groupId: o.groupId,
+    status: (o.status || 'PENDING').toLowerCase(),
+    createdAt: o.createdAt?.toISOString?.() || o.createdAt,
+    updatedAt: o.updatedAt?.toISOString?.() || o.updatedAt
+  });
 
-  if (status) {
-    orders = orders.filter(order => order.status === status);
+  let orders = [];
+
+  if (prisma) {
+    try {
+      const where = {};
+      if (status) where.status = status.toUpperCase();
+      if (customerPhone && customerPhone.trim()) {
+        where.customerPhone = { equals: customerPhone.trim(), mode: 'insensitive' };
+      }
+      if (groupId && groupId.trim()) where.groupId = groupId.trim();
+
+      const dbOrders = await prisma.order.findMany({
+        where: Object.keys(where).length ? where : undefined,
+        include: {
+          items: { include: { menuItem: true, vendor: true } },
+          vendor: true
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+      orders = dbOrders.map(formatOrder);
+    } catch (e) {
+      console.error('Error fetching orders from Prisma:', e);
+    }
   }
-  if (customerPhone && customerPhone.trim()) {
-    const phone = customerPhone.trim();
-    orders = orders.filter(order => order.customerPhone && order.customerPhone.trim() === phone);
-  }
 
-  // Sort by creation date (newest first)
-  orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // Merge in-memory orders not already in list (e.g. from before Prisma)
+  const orderIds = new Set(orders.map(o => o.id));
+  Array.from(database.orders.values()).forEach(order => {
+    if (orderIds.has(order.id)) return;
+    if (status && order.status !== status) return;
+    if (customerPhone && customerPhone.trim()) {
+      if (!order.customerPhone || order.customerPhone.trim() !== customerPhone.trim()) return;
+    }
+    if (groupId && groupId.trim()) {
+      if (!order.groupId || order.groupId !== groupId.trim()) return;
+    }
+    orders.push({
+      ...order,
+      vendorName: database.vendors.get(order.vendorId)?.name || order.vendorId
+    });
+    orderIds.add(order.id);
+  });
 
+  orders.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   res.json(orders);
 });
 
@@ -1974,8 +2215,22 @@ app.patch('/api/delivery/:deliveryId/status', (req, res) => {
   if (!['pending', 'dispatched', 'delivered'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
+  const previousStatus = delivery.status;
   delivery.status = status;
   delivery.updatedAt = new Date().toISOString();
+
+  // SMS for delivery updates (phone from first order in this delivery)
+  const firstOrderId = delivery.orderIds && delivery.orderIds[0];
+  const firstOrder = firstOrderId ? database.orders.get(firstOrderId) : null;
+  const customerPhone = firstOrder?.customerPhone || delivery.customerPhone;
+  if (customerPhone) {
+    if (status === 'dispatched') {
+      sendSMS(customerPhone, `🚚 Your order (${deliveryId}) is on its way! Delivery to ${delivery.destination || 'your address'}.`);
+    } else if (status === 'delivered') {
+      sendSMS(customerPhone, `✅ Your order (${deliveryId}) has been delivered. Thank you!`);
+    }
+  }
+
   res.json(delivery);
 });
 

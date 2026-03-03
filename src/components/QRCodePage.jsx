@@ -69,12 +69,12 @@ function QRCodePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-700 via-pink-600 to-red-500 flex flex-col items-center justify-center p-4">
-      <div className="bg-white rounded-3xl shadow-2xl p-6 max-w-md w-full">
+    <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-purple-700 via-pink-600 to-red-500 flex flex-col items-center justify-center p-3 sm:p-4 md:p-6 safe-y safe-x">
+      <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 max-w-md w-full">
         {/* Header */}
-        <div className="text-center mb-5">
-          <h1 className="text-2xl font-black text-gray-900">📲 Event QR Codes</h1>
-          <p className="text-gray-500 text-sm mt-1">Print, display, or share — guests scan to order</p>
+        <div className="text-center mb-4 sm:mb-5">
+          <h1 className="text-xl sm:text-2xl font-black text-gray-900">📲 Event QR Codes</h1>
+          <p className="text-gray-500 text-xs sm:text-sm mt-1">Print, display, or share — guests scan to order</p>
         </div>
 
         {/* Localhost warning */}
@@ -104,13 +104,14 @@ function QRCodePage() {
               onChange={(e) => setInputUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleApplyUrl()}
               placeholder="https://your-app.railway.app"
-              className={`flex-1 px-3 py-2.5 border-2 rounded-xl text-sm focus:outline-none transition-colors ${
+              className={`flex-1 min-w-0 px-3 py-3 sm:py-2.5 border-2 rounded-xl text-base sm:text-sm focus:outline-none transition-colors ${
                 isLocal ? 'border-amber-300 focus:border-amber-500' : 'border-gray-200 focus:border-purple-500'
               }`}
             />
             <button
+              type="button"
               onClick={handleApplyUrl}
-              className="px-4 py-2.5 bg-purple-600 text-white rounded-xl font-semibold text-sm hover:bg-purple-700 transition whitespace-nowrap"
+              className="touch-target px-4 py-2.5 bg-purple-600 text-white rounded-xl font-semibold text-sm hover:bg-purple-700 transition whitespace-nowrap"
             >
               Apply
             </button>
@@ -123,12 +124,13 @@ function QRCodePage() {
         </div>
 
         {/* Tab selector */}
-        <div className="flex bg-gray-100 rounded-xl p-1 mb-5">
+        <div className="flex bg-gray-100 rounded-xl p-1 mb-4 sm:mb-5">
           {Object.entries(qrTargets).map(([key, t]) => (
             <button
+              type="button"
               key={key}
               onClick={() => setActiveTab(key)}
-              className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`touch-target flex-1 py-2.5 sm:py-2 rounded-lg text-xs font-semibold transition-all ${
                 activeTab === key ? 'bg-white text-purple-700 shadow' : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -155,36 +157,37 @@ function QRCodePage() {
           </p>
         </div>
 
-        {/* Actions */}
+        {/* Actions — 2 cols mobile, touch-friendly */}
         <div className="grid grid-cols-2 gap-2">
           {dataUrl && (
             <a
               href={dataUrl}
               download={`qr-${activeTab}.png`}
-              className="flex items-center justify-center gap-2 py-3 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 transition"
+              className="touch-target flex items-center justify-center gap-2 py-3 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 transition"
             >
-              ⬇️ Download PNG
+              ⬇️ Download
             </a>
           )}
           <button
+            type="button"
             onClick={handleCopyLink}
-            className="flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-800 rounded-xl font-semibold text-sm hover:bg-gray-200 transition"
+            className="touch-target flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-800 rounded-xl font-semibold text-sm hover:bg-gray-200 transition"
           >
-            {copied ? '✅ Copied!' : '🔗 Copy Link'}
+            {copied ? '✅ Copied!' : '🔗 Copy'}
           </button>
           <a
             href={`/api/qr?url=${encodeURIComponent(activeTarget.url)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-800 rounded-xl font-semibold text-sm hover:bg-gray-200 transition"
+            className="touch-target flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-800 rounded-xl font-semibold text-sm hover:bg-gray-200 transition"
           >
-            🖼️ Share Image
+            🖼️ Share
           </a>
           <a
             href={activeTarget.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-semibold text-sm hover:opacity-90 transition"
+            className="touch-target flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-semibold text-sm hover:opacity-90 transition"
           >
             🚀 Open App
           </a>

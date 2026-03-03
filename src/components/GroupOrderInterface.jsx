@@ -70,10 +70,30 @@ function GroupOrderInterface({ onOrderComplete }) {
     addToCart(item, 1);
   };
 
-  const handleCheckout = (orderData) => {
-    console.log('Order data:', orderData);
+  const handleCheckout = async (orderData) => {
+    const body = {
+      items: orderData.items,
+      groupId: orderData.groupId || null,
+      orderType: orderData.orderType || 'DINE_IN',
+      tableNumber: orderData.tableNumber,
+      deliveryAddress: orderData.deliveryAddress,
+      deliveryFee: orderData.deliveryFee || 0,
+      guestName: orderData.guests?.[0]?.name || orderData.groupName || 'Group',
+      customerPhone: orderData.customerPhone || null,
+      specialInstructions: orderData.specialInstructions || null
+    };
+    const res = await fetch(`${API_URL}/api/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Order failed (${res.status})`);
+    }
+    const result = await res.json();
     if (onOrderComplete) {
-      onOrderComplete(orderData);
+      onOrderComplete(result);
     }
   };
 

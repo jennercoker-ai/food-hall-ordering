@@ -1,18 +1,21 @@
 # Railway deployment configuration
 # https://railway.app
 #
-# Deploy in 3 steps:
+# Deploy:
 #   1. Push this repo to GitHub
-#   2. Go to https://railway.app → New Project → Deploy from GitHub repo
-#   3. Add the environment variables listed in .env.example
-#      (DATABASE_URL and PUBLIC_URL are the only required ones)
+#   2. Railway → New Project → Deploy from GitHub repo
+#   3. Add Postgres (Plugin or connect external) and set DATABASE_URL
+#   4. Set PUBLIC_URL to your app URL (e.g. https://event-ordering-system-production-38a9.up.railway.app)
+#   5. (Optional) Run seed once: Railway → your service → Variables → run "npm run db:seed" via one-off command / shell
+#
+# startCommand runs migrations then the app so KDS and orders use the database.
 
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npm run start:prod"
+startCommand = "npm run release"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"

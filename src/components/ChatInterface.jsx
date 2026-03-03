@@ -117,72 +117,75 @@ function ChatInterface({ vendorId, sessionId, onOrderComplete }) {
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-500 via-pink-500 to-red-500 flex flex-col">
-      {/* Header */}
-      <div className="bg-white shadow-lg">
-        <div className="p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
+    <div className="min-h-screen min-h-[100dvh] bg-gradient-to-br from-purple-500 via-pink-500 to-red-500 flex flex-col safe-top">
+      {/* Header — responsive: stacked on mobile, row on tablet+ */}
+      <div className="bg-white shadow-lg safe-x">
+        <div className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 flex-shrink-0 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-bold text-lg sm:text-xl">
               {vendor?.name?.charAt(0) || '🍕'}
             </div>
-            <div>
-              <h1 className="font-bold text-gray-800 text-lg">{vendor?.name || 'Event Food Ordering'}</h1>
-              <p className="text-sm text-gray-600">{vendor?.description || 'Browse menus from all vendors'}</p>
+            <div className="min-w-0">
+              <h1 className="font-bold text-gray-800 text-base sm:text-lg truncate">{vendor?.name || 'Event Food Ordering'}</h1>
+              <p className="text-xs sm:text-sm text-gray-600 truncate">{vendor?.description || 'Browse menus from all vendors'}</p>
             </div>
           </div>
           <button
             onClick={() => setShowCart(!showCart)}
-            className="relative bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-full font-semibold shadow-lg hover:shadow-xl transition-all"
+            className="touch-target relative bg-gradient-to-r from-purple-600 to-pink-600 text-white px-5 py-2.5 sm:py-2 rounded-full font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 flex-shrink-0"
           >
-            🛒 Cart
+            <span>🛒</span>
+            <span>Cart</span>
             {cartItemCount > 0 && (
-              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold">
+              <span className="absolute -top-1 -right-1 sm:-top-2 sm:-right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center font-bold">
                 {cartItemCount}
               </span>
             )}
           </button>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs — touch-friendly on all devices */}
         <div className="flex border-t border-gray-200">
           <button
             onClick={() => setActiveTab('chat')}
-            className={`flex-1 px-4 py-3 font-semibold transition-colors ${
+            className={`flex-1 px-3 sm:px-4 py-3.5 sm:py-3 font-semibold text-sm sm:text-base transition-colors touch-target flex items-center justify-center gap-1.5 ${
               activeTab === 'chat'
                 ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-600 hover:bg-gray-50'
             }`}
           >
-            💬 Chat
+            <span>💬</span>
+            <span>Chat</span>
           </button>
           <button
             onClick={() => setActiveTab('browse')}
-            className={`flex-1 px-4 py-3 font-semibold transition-colors ${
+            className={`flex-1 px-3 sm:px-4 py-3.5 sm:py-3 font-semibold text-sm sm:text-base transition-colors touch-target flex items-center justify-center gap-1.5 ${
               activeTab === 'browse'
                 ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
                 : 'text-gray-600 hover:bg-gray-50'
             }`}
           >
-            📋 Browse Vendors
+            <span>📋</span>
+            <span>Browse</span>
           </button>
         </div>
       </div>
 
-      {/* Content Container */}
-      <div className="flex-1 overflow-y-auto p-4 pb-24">
+      {/* Content Container — scrollable, padding for fixed input + safe area */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 pb-28 sm:pb-24 safe-bottom">
         {activeTab === 'chat' ? (
           <div className="space-y-4">
             {messages.map((message) => (
           <div key={message.id}>
             {message.role === 'user' ? (
               <div className="flex justify-end">
-                <div className="bg-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-xs shadow-md">
-                  <p className="text-gray-800">{message.content}</p>
+                <div className="bg-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-[85%] sm:max-w-xs shadow-md">
+                  <p className="text-gray-800 break-words">{message.content}</p>
                 </div>
               </div>
             ) : (
               <div className="flex justify-start">
-                <div className="bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-2xl rounded-tl-sm px-4 py-3 max-w-md shadow-lg">
+                <div className="bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-2xl rounded-tl-sm px-4 py-3 max-w-[95%] sm:max-w-md shadow-lg">
                   <p className="mb-2">{message.content}</p>
                   
                   {/* Menu Items */}
@@ -298,22 +301,22 @@ function ChatInterface({ vendorId, sessionId, onOrderComplete }) {
         )}
       </div>
 
-      {/* Input Bar - Only show for chat tab */}
+      {/* Input Bar — fixed at bottom with safe area for notched phones */}
       {activeTab === 'chat' && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg">
-          <form onSubmit={handleSend} className="flex gap-2">
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 sm:p-4 shadow-lg safe-x safe-bottom">
+          <form onSubmit={handleSend} className="flex gap-2 max-w-2xl mx-auto">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder="Ask me anything..."
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="flex-1 min-w-0 px-4 py-3 sm:py-3 border border-gray-300 rounded-full text-base focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               disabled={loading}
             />
             <button
               type="submit"
               disabled={loading || !inputText.trim()}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-full font-semibold shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="touch-target flex-shrink-0 bg-gradient-to-r from-purple-600 to-pink-600 text-white px-5 sm:px-6 py-3 rounded-full font-semibold shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
               Send
             </button>
