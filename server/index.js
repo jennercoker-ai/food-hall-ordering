@@ -2002,18 +2002,19 @@ app.get('/api/vendors/:vendorId/orders', async (req, res) => {
   }
   orders = orders.concat(memOrders);
   orders.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  res.json(orders);
+  res.json(Array.isArray(orders) ? orders : []);
 });
 
-// Get order items for vendor KDS (Kitchen Display System)
+// Get order items for vendor KDS (Kitchen Display System) (Kitchen Display System)
 app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
   const { vendorId } = req.params;
   const { status } = req.query;
+  const resolvedVendorId = await resolveVendorIdForOrders(vendorId);
 
   // Try Prisma first when available; on any error fall back to in-memory so KDS never 500s
   if (prisma) {
     try {
-      const whereClause = { vendorId };
+      const whereClause = { vendorId: resolvedVendorId };
       if (status) {
         whereClause.status = status;
       } else {
@@ -2065,7 +2066,8 @@ app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
     database.orders.forEach(order => {
       if (order.items) {
         order.items.forEach(item => {
-          if (item.vendorId === vendorId || order.vendorId === vendorId) {
+          const matchVendor = order.vendorId === vendorId || order.vendorId === resolvedVendorId || item.vendorId === vendorId || item.vendorId === resolvedVendorId;
+          if (matchVendor) {
             items.push({
               ...item,
               name: item.name || 'Item',

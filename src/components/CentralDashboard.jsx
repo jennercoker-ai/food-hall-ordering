@@ -40,6 +40,7 @@ function CentralDashboard() {
       setOrders(data);
     } catch (error) {
       console.error('Failed to fetch central orders:', error);
+      setOrders([]);
     } finally {
       setLoading(false);
     }

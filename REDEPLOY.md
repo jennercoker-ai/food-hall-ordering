@@ -1,5 +1,7 @@
 # Redeploy
 
+**Latest fixes:** Vendor dashboard, KDS, and central order board now resolve demo vendor ids (e.g. `vendor-001`) to Prisma vendor ids so orders show when using demo hub links. KDS order-items uses the same resolution. Build verified with `npm run build`.
+
 ## Option A: Push to GitHub (if connected to Railway)
 
 1. Commit and push your changes:
