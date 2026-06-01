@@ -29,10 +29,14 @@ class FoodHallConcierge {
 
   async getAllMenuItems() {
     if (this.prisma) {
-      return await this.prisma.menuItem.findMany({
-        where: { available: true },
-        include: { vendor: true }
-      });
+      try {
+        return await this.prisma.menuItem.findMany({
+          where: { available: true },
+          include: { vendor: true }
+        });
+      } catch (e) {
+        console.error('Concierge getAllMenuItems DB error, using in-memory menu:', e.message || e);
+      }
     }
     
     if (this.inMemoryDb) {
@@ -57,7 +61,11 @@ class FoodHallConcierge {
 
   async getVendors() {
     if (this.prisma) {
-      return await this.prisma.vendor.findMany();
+      try {
+        return await this.prisma.vendor.findMany();
+      } catch (e) {
+        console.error('Concierge getVendors DB error, using in-memory vendors:', e.message || e);
+      }
     }
     
     if (this.inMemoryDb) {
