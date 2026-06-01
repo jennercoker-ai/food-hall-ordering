@@ -1367,7 +1367,7 @@ app.get('/api/orders/:orderId', async (req, res) => {
           orderType: dbOrder.orderType,
           tableNumber: dbOrder.tableNumber,
           groupId: dbOrder.groupId,
-          status: dbOrder.status.toLowerCase(),
+          status: deriveOrderStatus(dbOrder.status, dbOrder.items),
           createdAt: dbOrder.createdAt?.toISOString?.(),
           updatedAt: dbOrder.updatedAt?.toISOString?.()
         };
@@ -1878,54 +1878,135 @@ app.patch('/api/orders/:orderId/vendor/:vendorId/ready', async (req, res) => {
 });
 
 // Update order status (for vendors)
-app.patch('/api/orders/:orderId/status', (req, res) => {
+app.patch('/api/orders/:orderId/status', async (req, res) => {
   const { orderId } = req.params;
   const { status } = req.body;
-  
-  const order = database.orders.get(orderId);
-  
-  if (!order) {
+  const normalized = String(status || '').toLowerCase();
+
+  const persist = ORDER_STATUS_PERSIST[normalized];
+  if (!persist) {
+    return res.status(400).json({ error: `Invalid status: ${status}` });
+  }
+
+  // Persist to Prisma first so the vendor dashboard, KDS and central board —
+  // which all read from the database — reflect the change across restarts and
+  // multiple server instances.
+  let dbOrder = null;
+  if (prisma) {
+    try {
+      dbOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: { status: persist.order },
+        include: { items: true, vendor: true }
+      });
+      if (persist.item) {
+        await prisma.orderItem.updateMany({
+          where: { orderId },
+          data: { status: persist.item }
+        });
+      }
+    } catch (e) {
+      // P2025 = record not found: order may live only in the in-memory store
+      // (e.g. created before DB persistence). Fall through to that path.
+      if (e?.code !== 'P2025') {
+        console.error('Error persisting order status to Prisma:', e);
+      }
+    }
+  }
+
+  // Keep the in-memory copy in sync when present.
+  const memOrder = database.orders.get(orderId);
+  let previousStatus = null;
+  if (memOrder) {
+    previousStatus = memOrder.status;
+    memOrder.status = normalized;
+    memOrder.updatedAt = new Date().toISOString();
+    database.orders.set(orderId, memOrder);
+  }
+
+  if (!dbOrder && !memOrder) {
     return res.status(404).json({ error: 'Order not found' });
   }
-  
-  const previousStatus = order.status;
-  order.status = status;
-  order.updatedAt = new Date().toISOString();
-  database.orders.set(orderId, order);
 
-  // Prepare update payload
+  // Build a unified order object for notifications + response.
+  const vendorName =
+    memOrder?.vendorName ||
+    dbOrder?.vendor?.name ||
+    database.vendors.get((memOrder || dbOrder)?.vendorId)?.name;
+
+  const order = memOrder || {
+    id: dbOrder.id,
+    orderNumber: dbOrder.orderNumber,
+    vendorId: dbOrder.vendorId,
+    vendorName,
+    customerPhone: dbOrder.customerPhone,
+    total: dbOrder.totalAmount,
+    status: normalized,
+    updatedAt: new Date().toISOString()
+  };
+
   const updatePayload = {
     type: 'ORDER_STATUS',
     orderId,
     orderNumber: order.orderNumber,
     previousStatus,
-    status,
-    vendorName: database.vendors.get(order.vendorId)?.name,
+    status: normalized,
+    vendorName,
     updatedAt: order.updatedAt,
-    order: { ...order, vendorName: database.vendors.get(order.vendorId)?.name }
+    order: { ...order, vendorName }
   };
 
   // Notify central order board of status change
   notifyCentral(order, 'ORDER_STATUS');
-  
+
   // Notify SSE subscribers for this specific order
   notifyOrderSSE(orderId, updatePayload);
-  
-  // Notify SSE subscribers for this customer
+
+  // Notify SSE subscribers for this customer + send SMS
   if (order.customerPhone) {
     notifyCustomerSSE(order.customerPhone, updatePayload);
+    try {
+      const message = getStatusMessage(order, normalized);
+      sendSMS(order.customerPhone, message);
+    } catch (e) {
+      console.error('Failed to send status SMS:', e);
+    }
   }
 
-  // Send SMS notification for status update
-  if (order.customerPhone) {
-    const message = getStatusMessage(order, status);
-    sendSMS(order.customerPhone, message);
-  }
+  console.log(`Order ${order.orderNumber} status updated to: ${normalized}`);
 
-  console.log(`Order ${order.orderNumber} status updated to: ${status}`);
-
-  res.json(order);
+  res.json({ ...order, status: normalized });
 });
+
+// Map the vendor dashboard's 5-stage workflow (pending → confirmed → preparing
+// → ready → completed) onto the two persisted fields we already have:
+//   Order.status     : PENDING | PAID | COMPLETED | CANCELLED
+//   OrderItem.status : RECEIVED | PREPARING | READY | COLLECTED
+// This lets status changes survive server restarts / multiple instances and
+// keeps the vendor dashboard and the KDS (which reads item statuses) in sync,
+// without requiring a database schema/enum migration.
+function deriveOrderStatus(prismaOrderStatus, items) {
+  const orderStatus = String(prismaOrderStatus || 'PENDING').toUpperCase();
+  if (orderStatus === 'CANCELLED') return 'cancelled';
+  if (orderStatus === 'COMPLETED') return 'completed';
+
+  const itemStatuses = (items || []).map(it => String(it.status || '').toUpperCase());
+  if (itemStatuses.length > 0 && itemStatuses.every(s => s === 'COLLECTED')) return 'completed';
+  if (itemStatuses.some(s => s === 'READY')) return 'ready';
+  if (itemStatuses.some(s => s === 'PREPARING')) return 'preparing';
+  if (orderStatus === 'PAID') return 'confirmed';
+  return 'pending';
+}
+
+// How each dashboard stage is persisted across the two status fields.
+const ORDER_STATUS_PERSIST = {
+  pending:   { order: 'PENDING',   item: 'RECEIVED' },
+  confirmed: { order: 'PAID',      item: 'RECEIVED' },
+  preparing: { order: 'PAID',      item: 'PREPARING' },
+  ready:     { order: 'PAID',      item: 'READY' },
+  completed: { order: 'COMPLETED', item: 'COLLECTED' },
+  cancelled: { order: 'CANCELLED', item: null },
+};
 
 // Resolve vendor id: map in-memory ids (vendor-001, etc.) to Prisma vendor id by name so dashboard shows orders
 const resolveVendorIdForOrders = async (vendorId) => {
@@ -1971,7 +2052,7 @@ app.get('/api/vendors/:vendorId/orders', async (req, res) => {
     orderType: o.orderType,
     tableNumber: o.tableNumber,
     groupId: o.groupId,
-    status: (o.status || 'PENDING').toLowerCase(),
+    status: deriveOrderStatus(o.status, o.items),
     createdAt: o.createdAt?.toISOString?.() || o.createdAt,
     updatedAt: o.updatedAt?.toISOString?.() || o.updatedAt
   });
@@ -2140,7 +2221,7 @@ app.get('/api/orders', async (req, res) => {
     orderType: o.orderType,
     tableNumber: o.tableNumber,
     groupId: o.groupId,
-    status: (o.status || 'PENDING').toLowerCase(),
+    status: deriveOrderStatus(o.status, o.items),
     createdAt: o.createdAt?.toISOString?.() || o.createdAt,
     updatedAt: o.updatedAt?.toISOString?.() || o.updatedAt
   });
