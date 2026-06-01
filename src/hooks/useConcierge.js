@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -108,12 +108,15 @@ export function useConcierge({ sessionId, groupId, onAddToCart } = {}) {
     return sendMessage(`I'd like the ${item.name}`);
   }, [sendMessage, onAddToCart]);
 
+  const startedForSessionRef = useRef(null);
+
   const startConversation = useCallback(() => {
-    if (messages.length === 0) {
-      return sendMessage('Hello');
+    if (!sessionId || startedForSessionRef.current === sessionId) {
+      return Promise.resolve(null);
     }
-    return Promise.resolve(null);
-  }, [messages.length, sendMessage]);
+    startedForSessionRef.current = sessionId;
+    return sendMessage('Hello');
+  }, [sessionId, sendMessage]);
 
   const clearConversation = useCallback(() => {
     setMessages([]);

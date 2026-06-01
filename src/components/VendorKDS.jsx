@@ -67,7 +67,11 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
 
   useEffect(() => {
     fetchOrderItems();
+    const interval = setInterval(fetchOrderItems, 10000);
+    return () => clearInterval(interval);
   }, [fetchOrderItems]);
+
+  const lineItemId = (item) => item.id || item.orderLineId;
 
   // WebSocket connection for real-time updates
   useEffect(() => {
@@ -83,13 +87,11 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'NEW_ORDER') {
-          // Add new order items
+        if (data.type === 'NEW_ORDER' || data.type === 'ORDER_STATUS') {
           fetchOrderItems();
         } else if (data.type === 'ITEM_STATUS') {
-          // Update item status
-          setOrderItems(prev => prev.map(item => 
-            item.id === data.orderItemId 
+          setOrderItems(prev => prev.map(item =>
+            lineItemId(item) === data.orderItemId
               ? { ...item, status: data.itemStatus }
               : item
           ));
@@ -125,11 +127,14 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
       
       if (res.ok) {
         setOrderItems(prev => prev.map(item =>
-          item.id === orderItemId ? { ...item, status: 'PREPARING' } : item
+          lineItemId(item) === orderItemId ? { ...item, status: 'PREPARING' } : item
         ));
+      } else {
+        fetchOrderItems();
       }
     } catch (error) {
       console.error('Error updating item:', error);
+      fetchOrderItems();
     }
   };
 
@@ -145,7 +150,7 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
       if (res.ok) {
         const data = await res.json();
         setOrderItems(prev => prev.map(item =>
-          item.id === orderItemId ? { ...item, status: 'READY' } : item
+          lineItemId(item) === orderItemId ? { ...item, status: 'READY' } : item
         ));
         
         // Show notification
@@ -154,9 +159,12 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
         } else {
           showNotification('✅ Item Ready', `Customer notified (${data.readyCount}/${data.totalItems} ready)`);
         }
+      } else {
+        fetchOrderItems();
       }
     } catch (error) {
       console.error('Error marking item ready:', error);
+      fetchOrderItems();
     }
   };
 
@@ -171,11 +179,14 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
       
       if (res.ok) {
         setOrderItems(prev => prev.map(item =>
-          item.id === orderItemId ? { ...item, status: 'COLLECTED' } : item
+          lineItemId(item) === orderItemId ? { ...item, status: 'COLLECTED' } : item
         ));
+      } else {
+        fetchOrderItems();
       }
     } catch (error) {
       console.error('Error marking item collected:', error);
+      fetchOrderItems();
     }
   };
 
@@ -325,7 +336,7 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
                 <div className="divide-y divide-slate-700">
                   {order.items.map((item) => (
                     <div 
-                      key={item.id}
+                      key={lineItemId(item)}
                       className={`p-4 border-l-4 ${statusColors[item.status]}`}
                     >
                       <div className="flex items-start justify-between mb-2">
@@ -357,7 +368,7 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
                         {item.status === 'RECEIVED' && (
                           <button
                             type="button"
-                            onClick={() => markAsPreparing(item.id)}
+                            onClick={() => markAsPreparing(lineItemId(item))}
                             className="touch-target flex-1 min-w-0 bg-orange-600 hover:bg-orange-500 active:bg-orange-700 py-3 sm:py-2 rounded font-bold transition text-sm"
                           >
                             🍳 START
@@ -366,7 +377,7 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
                         {(item.status === 'RECEIVED' || item.status === 'PREPARING') && (
                           <button
                             type="button"
-                            onClick={() => markAsReady(item.id)}
+                            onClick={() => markAsReady(lineItemId(item))}
                             className="touch-target flex-1 min-w-0 bg-green-600 hover:bg-green-500 active:bg-green-700 py-3 sm:py-2 rounded font-bold transition text-sm"
                           >
                             ✅ READY
@@ -375,7 +386,7 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
                         {item.status === 'READY' && (
                           <button
                             type="button"
-                            onClick={() => markAsCollected(item.id)}
+                            onClick={() => markAsCollected(lineItemId(item))}
                             className="touch-target flex-1 min-w-0 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 py-3 sm:py-2 rounded font-bold transition text-sm"
                           >
                             🎉 COLLECTED

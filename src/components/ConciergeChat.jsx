@@ -6,9 +6,12 @@ import MenuCard from './MenuCard';
 function ConciergeChat({ sessionId, groupId, onOrderComplete }) {
   const [inputText, setInputText] = useState('');
   const [showCart, setShowCart] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState(null);
   const messagesEndRef = useRef(null);
   
-  const { cart, addToCart, getCartTotal } = useStore();
+  const { cart, addToCart, getCartTotal, createOrder } = useStore();
   
   const {
     messages,
@@ -27,8 +30,10 @@ function ConciergeChat({ sessionId, groupId, onOrderComplete }) {
   });
 
   useEffect(() => {
-    startConversation();
-  }, [startConversation]);
+    if (sessionId) {
+      startConversation();
+    }
+  }, [sessionId, startConversation]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -47,7 +52,43 @@ function ConciergeChat({ sessionId, groupId, onOrderComplete }) {
   };
 
   const handleAddToCart = (item) => {
-    addToCart(item, 1);
+    if (!item.vendorId) {
+      console.warn('Concierge item missing vendorId', item);
+    }
+    addToCart({ ...item, vendorId: item.vendorId }, 1);
+  };
+
+  const handleCheckout = async () => {
+    if (!phone.trim()) {
+      setCheckoutError('Please enter your phone number for order updates.');
+      return;
+    }
+    if (cart.length === 0) {
+      setCheckoutError('Your cart is empty.');
+      return;
+    }
+    setCheckoutError(null);
+    setIsCheckingOut(true);
+    try {
+      const result = await createOrder(
+        phone.trim(),
+        null,
+        null,
+        null,
+        'COLLECTION',
+        null,
+        0
+      );
+      setShowCart(false);
+      if (onOrderComplete) {
+        onOrderComplete(result);
+      }
+    } catch (err) {
+      console.error('Concierge checkout failed:', err);
+      setCheckoutError('Could not place your order. Please try again.');
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -286,15 +327,27 @@ function ConciergeChat({ sessionId, groupId, onOrderComplete }) {
               )}
             </div>
             {cart.length > 0 && (
-              <div className="p-4 border-t">
+              <div className="p-4 border-t space-y-3">
+                <label className="block text-sm font-medium text-gray-700">
+                  Phone number (for order updates)
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+44 7xxx xxxxxx"
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                </label>
+                {checkoutError && (
+                  <p className="text-sm text-red-600">{checkoutError}</p>
+                )}
                 <button 
-                  onClick={() => {
-                    setShowCart(false);
-                    if (onOrderComplete) onOrderComplete();
-                  }}
-                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-full font-bold shadow-lg hover:shadow-xl transition-all"
+                  type="button"
+                  onClick={handleCheckout}
+                  disabled={isCheckingOut}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-full font-bold shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
                 >
-                  Proceed to Checkout
+                  {isCheckingOut ? 'Placing order…' : 'Place order (pay on collection)'}
                 </button>
               </div>
             )}

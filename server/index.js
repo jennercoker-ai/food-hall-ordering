@@ -1218,9 +1218,13 @@ app.post('/api/orders', async (req, res) => {
     }
     const menuById = new Map(menu.map(m => [m.id, m]));
     const vendorItems = rawItems.map(item => {
-      const menuItem = menuById.get(item.id) || {};
+      const menuItem = menuById.get(item.id) || menuById.get(item.menuItemId) || {};
+      const menuItemId = item.menuItemId || item.id;
+      const lineId = uuidv4();
       return {
         ...item,
+        id: lineId,
+        menuItemId,
         name: item.name || menuItem.name,
         allergens: menuItem.allergens || item.allergens || [],
         dietary: menuItem.dietary || item.dietary || []
@@ -1248,7 +1252,7 @@ app.post('/api/orders', async (req, res) => {
       try {
         const orderItemsData = [];
         for (const it of vendorItems) {
-          const menuItemId = it.id;
+          const menuItemId = it.menuItemId || it.id;
           if (!menuItemId || !vendorId) continue;
           const qty = Math.max(1, parseInt(it.quantity, 10) || 1);
           const price = Number(it.price);
@@ -1697,7 +1701,9 @@ app.patch('/api/order-items/:orderItemId/status', async (req, res) => {
   const updateItemInMemory = () => {
     for (const order of database.orders.values()) {
       if (!order.items) continue;
-      const item = order.items.find(it => it.id === orderItemId);
+      const item = order.items.find(it =>
+        it.id === orderItemId || it.orderLineId === orderItemId
+      );
       if (!item) continue;
       item.status = newStatus;
       order.updatedAt = new Date().toISOString();
@@ -1985,6 +1991,9 @@ app.patch('/api/orders/:orderId/status', async (req, res) => {
     previousStatus = memOrder.status;
     memOrder.status = normalized;
     memOrder.updatedAt = new Date().toISOString();
+    if (memOrder.items && persist.item) {
+      memOrder.items.forEach(it => { it.status = persist.item; });
+    }
     database.orders.set(orderId, memOrder);
   }
 
