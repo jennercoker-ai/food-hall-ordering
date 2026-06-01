@@ -11,14 +11,32 @@ const { createConciergeRoutes } = require('./concierge');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Prisma client for handoff (persisted orders)
+// Prisma client for persisted orders. PrismaClient() never throws at construction
+// (it connects lazily), so a missing/unreachable DATABASE_URL would otherwise make
+// every query hang and turn request handlers into 502s. We probe connectivity once
+// with a hard timeout and fall back to in-memory mode if the database isn't usable.
 let prisma = null;
 try {
   const { PrismaClient } = require('@prisma/client');
-  prisma = new PrismaClient();
-  console.log('✅ Prisma connected (handoff available at POST /api/handoff)');
+  const client = new PrismaClient();
+  prisma = client;
+  (async () => {
+    try {
+      await Promise.race([
+        client.$queryRaw`SELECT 1`,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('database connectivity probe timed out')), 6000)
+        )
+      ]);
+      console.log('✅ Prisma connected (database persistence enabled)');
+    } catch (e) {
+      prisma = null;
+      console.warn('⚠️  Database unreachable — running in in-memory mode. Reason:', e.message || e);
+      try { client.$disconnect(); } catch (_) {}
+    }
+  })();
 } catch (e) {
-  console.log('ℹ️  Prisma not available - POST /api/handoff will be disabled');
+  console.log('ℹ️  Prisma not available - running in in-memory mode');
 }
 
 // Initialize Twilio client (optional - works without credentials for development)
@@ -1673,8 +1691,51 @@ app.patch('/api/order-items/:orderItemId/status', async (req, res) => {
     ? String(status).toUpperCase()
     : 'READY';
 
+  // In-memory fallback so the KDS works without a database, and for orders that
+  // only ever made it into memory (DB write failed). Returns a response payload
+  // or null when no matching in-memory item exists.
+  const updateItemInMemory = () => {
+    for (const order of database.orders.values()) {
+      if (!order.items) continue;
+      const item = order.items.find(it => it.id === orderItemId);
+      if (!item) continue;
+      item.status = newStatus;
+      order.updatedAt = new Date().toISOString();
+      const upper = s => String(s || 'RECEIVED').toUpperCase();
+      const readyCount = order.items.filter(i => ['READY', 'COLLECTED'].includes(upper(i.status))).length;
+      const allReady = order.items.every(i => ['READY', 'COLLECTED'].includes(upper(i.status)));
+      if (allReady) order.status = 'completed';
+      const vendor = database.vendors.get(order.vendorId);
+      const payload = {
+        type: 'ITEM_STATUS',
+        orderItemId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        itemName: item.name || 'Item',
+        itemStatus: newStatus,
+        vendorId: item.vendorId || order.vendorId,
+        vendorName: vendor?.name || 'Vendor',
+        station: vendor?.collectionPoint || null,
+        readyCount,
+        totalItems: order.items.length,
+        allReady,
+        timestamp: new Date().toISOString()
+      };
+      notifyOrderSSE(order.id, payload);
+      if (order.groupId) notifyGroupSSE(order.groupId, { ...payload, type: 'GROUP_ITEM_STATUS' });
+      if (order.customerPhone) notifyCustomerSSE(order.customerPhone, payload);
+      centralConnections.forEach(ws => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+      });
+      return { success: true, item: { ...item, id: orderItemId, status: newStatus }, readyCount, totalItems: order.items.length, allReady };
+    }
+    return null;
+  };
+
   if (!prisma) {
-    return res.status(503).json({ error: 'Database not available' });
+    const result = updateItemInMemory();
+    if (result) return res.json(result);
+    return res.status(404).json({ error: 'Order item not found' });
   }
 
   try {
@@ -1772,6 +1833,9 @@ app.patch('/api/order-items/:orderItemId/status', async (req, res) => {
       allReady
     });
   } catch (error) {
+    // Item may exist only in memory (e.g. DB write failed earlier) — try that path.
+    const result = updateItemInMemory();
+    if (result) return res.json(result);
     console.error('Error updating order item:', error);
     res.status(500).json({ error: error.message || 'Failed to update item status' });
   }
@@ -2011,13 +2075,18 @@ const ORDER_STATUS_PERSIST = {
 // Resolve vendor id: map in-memory ids (vendor-001, etc.) to Prisma vendor id by name so dashboard shows orders
 const resolveVendorIdForOrders = async (vendorId) => {
   if (!prisma) return vendorId;
-  const memVendor = database.vendors.get(vendorId);
-  if (memVendor && memVendor.name) {
-    const prismaVendor = await prisma.vendor.findFirst({
-      where: { name: memVendor.name },
-      select: { id: true }
-    });
-    if (prismaVendor) return prismaVendor.id;
+  try {
+    const memVendor = database.vendors.get(vendorId);
+    if (memVendor && memVendor.name) {
+      const prismaVendor = await prisma.vendor.findFirst({
+        where: { name: memVendor.name },
+        select: { id: true }
+      });
+      if (prismaVendor) return prismaVendor.id;
+    }
+  } catch (e) {
+    // Never let a DB hiccup hang the request — fall back to the raw id.
+    console.error('resolveVendorIdForOrders failed, using raw id:', e.message || e);
   }
   return vendorId;
 };
@@ -2092,12 +2161,16 @@ app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
   const { status } = req.query;
   const resolvedVendorId = await resolveVendorIdForOrders(vendorId);
 
-  // Try Prisma first when available; on any error fall back to in-memory so KDS never 500s
+  let items = [];
+  const dbOrderIds = new Set();
+
+  // Prisma first when available. On any error we fall through to the in-memory
+  // merge below so the KDS never 500s or hangs.
   if (prisma) {
     try {
       const whereClause = { vendorId: resolvedVendorId };
       if (status) {
-        whereClause.status = status;
+        whereClause.status = String(status).toUpperCase();
       } else {
         whereClause.status = { not: 'COLLECTED' };
       }
@@ -2128,69 +2201,71 @@ app.get('/api/vendors/:vendorId/order-items', async (req, res) => {
           { order: { createdAt: 'asc' } }
         ]
       });
-      const formattedItems = orderItems.map(item => ({
-        ...item,
-        orderId: item.orderId,
-        orderNumber: String(item.order?.orderNumber ?? item.orderId?.slice(-4) ?? '').toUpperCase(),
-        name: item.menuItem?.name || item.name,
-        guestName: item.guestName
-      }));
-      return res.json(formattedItems);
+      orderItems.forEach(item => {
+        dbOrderIds.add(item.orderId);
+        items.push({
+          ...item,
+          orderId: item.orderId,
+          orderNumber: String(item.order?.orderNumber ?? item.orderId?.slice(-4) ?? '').toUpperCase(),
+          name: item.menuItem?.name || item.name,
+          guestName: item.guestName
+        });
+      });
     } catch (e) {
       console.error('KDS order-items Prisma error (falling back to in-memory):', e.message || e);
     }
   }
 
-  // In-memory fallback (or when Prisma unavailable)
+  // Always merge in-memory order items too. This covers pure in-memory mode AND
+  // orders that failed to persist to the database and only exist in memory, so
+  // the kitchen display is never silently empty. Orders already returned by the
+  // DB are skipped to avoid duplicates.
   try {
-    let items = [];
     database.orders.forEach(order => {
-      if (order.items) {
-        order.items.forEach(item => {
-          const matchVendor = order.vendorId === vendorId || order.vendorId === resolvedVendorId || item.vendorId === vendorId || item.vendorId === resolvedVendorId;
-          if (matchVendor) {
-            items.push({
-              ...item,
-              name: item.name || 'Item',
-              orderId: order.id,
-              orderNumber: (order.orderNumber != null ? String(order.orderNumber) : order.id.slice(-4)).toUpperCase(),
-              order: {
-                id: order.id,
-                orderNumber: order.orderNumber,
-                customerName: order.guestName || order.customerName,
-                customerPhone: order.customerPhone,
-                specialInstructions: order.specialInstructions,
-                groupId: order.groupId,
-                createdAt: order.createdAt
-              },
-              status: (item.status || 'RECEIVED').toUpperCase()
-            });
-          }
+      if (!order.items || dbOrderIds.has(order.id)) return;
+      order.items.forEach(item => {
+        const matchVendor = order.vendorId === vendorId || order.vendorId === resolvedVendorId || item.vendorId === vendorId || item.vendorId === resolvedVendorId;
+        if (!matchVendor) return;
+        items.push({
+          ...item,
+          name: item.name || 'Item',
+          orderId: order.id,
+          orderNumber: (order.orderNumber != null ? String(order.orderNumber) : String(order.id).slice(-4)).toUpperCase(),
+          order: {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            customerName: order.guestName || order.customerName,
+            customerPhone: order.customerPhone,
+            specialInstructions: order.specialInstructions,
+            groupId: order.groupId,
+            createdAt: order.createdAt
+          },
+          status: (item.status || 'RECEIVED').toUpperCase()
         });
-      }
+      });
     });
-    
-    // Filter by status
-    if (status) {
-      items = items.filter(item => item.status === status);
-    } else {
-      items = items.filter(item => item.status !== 'COLLECTED');
-    }
-    
-    // Sort: RECEIVED first, then PREPARING, then oldest first
-    const statusOrder = { 'RECEIVED': 0, 'PREPARING': 1, 'READY': 2 };
-    items.sort((a, b) => {
-      const statusDiff = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
-      if (statusDiff !== 0) return statusDiff;
-      const aTime = (a.order && a.order.createdAt) || a.createdAt || 0;
-      const bTime = (b.order && b.order.createdAt) || b.createdAt || 0;
-      return new Date(aTime) - new Date(bTime);
-    });
-    res.json(items);
-  } catch (error) {
-    console.error('Error fetching vendor order items:', error);
-    res.status(500).json({ error: 'Failed to fetch order items' });
+  } catch (e) {
+    console.error('KDS in-memory merge error:', e.message || e);
   }
+
+  // Filter by status (mirror the DB default of hiding collected items)
+  if (status) {
+    const want = String(status).toUpperCase();
+    items = items.filter(item => String(item.status).toUpperCase() === want);
+  } else {
+    items = items.filter(item => String(item.status).toUpperCase() !== 'COLLECTED');
+  }
+
+  // Sort: RECEIVED first, then PREPARING, then READY, then oldest first
+  const statusOrder = { 'RECEIVED': 0, 'PREPARING': 1, 'READY': 2 };
+  items.sort((a, b) => {
+    const statusDiff = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
+    if (statusDiff !== 0) return statusDiff;
+    const aTime = (a.order && a.order.createdAt) || a.createdAt || 0;
+    const bTime = (b.order && b.order.createdAt) || b.createdAt || 0;
+    return new Date(aTime) - new Date(bTime);
+  });
+  res.json(items);
 });
 
 // Get all orders (for central dashboard); optional ?customerPhone= ?groupId= ?status=
