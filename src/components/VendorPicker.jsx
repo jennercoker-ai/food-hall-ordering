@@ -36,7 +36,7 @@ function VendorPicker({ onSelect, forKDS = false }) {
     <div className={`min-h-screen ${forKDS ? 'bg-slate-900' : 'bg-gray-50'}`}>
       <div className={`${forKDS ? 'bg-slate-800 border-b border-slate-700' : 'bg-gradient-to-r from-purple-600 to-pink-600'} text-white p-6 shadow-lg`}>
         <div className="max-w-4xl mx-auto">
-          <a href={`${BASE}/?view=demo`} className="text-sm text-white/90 hover:text-white underline inline-block mb-2">← Back to demo hub</a>
+          <a href={`${BASE}/?view=staff`} className="text-sm text-white/90 hover:text-white underline inline-block mb-2">← Staff home</a>
           <h1 className="text-3xl font-bold mb-2">
             {forKDS ? '🍳 Kitchen Display System' : 'Vendor Dashboard'}
           </h1>

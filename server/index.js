@@ -2548,7 +2548,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 WebSocket server ready`);
   console.log(`🌐 App: ${publicUrl}`);
   if (isProduction) {
-    console.log(`📋 Demo hub: ${publicUrl}/?view=demo`);
+    console.log(`📋 Staff home: ${publicUrl}/?view=staff`);
+    console.log(`🎩 Order:    ${publicUrl}/`);
     console.log(`📲 QR codes: ${publicUrl}/?view=qr`);
     console.log(`🍳 KDS:      ${publicUrl}/?view=kds`);
   }

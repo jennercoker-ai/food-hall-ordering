@@ -29,7 +29,7 @@ function QRCodePage() {
   const finalUrl = publicUrl.replace(/\/$/, '') + '/';
 
   const qrTargets = {
-    customer: { label: 'Customer Ordering', url: finalUrl, desc: 'Scan to browse all vendors & order', icon: '🍕' },
+    customer: { label: 'Order now (Concierge)', url: finalUrl, desc: 'Scan to open Food Hall ordering', icon: '🎩' },
     concierge: { label: 'AI Concierge', url: `${publicUrl.replace(/\/$/, '')}/?view=concierge`, desc: 'Scan to open the AI food concierge', icon: '🎩' },
     family: { label: 'Group Order', url: `${publicUrl.replace(/\/$/, '')}/?view=family`, desc: 'Scan to start or join a group order', icon: '👨‍👩‍👧‍👦' },
   };
@@ -202,8 +202,8 @@ function QRCodePage() {
 
         {/* Back link */}
         <div className="mt-4 text-center">
-          <a href="/?view=demo" className="text-xs text-gray-400 hover:text-gray-600 underline">
-            ← Back to demo hub
+          <a href="/?view=staff" className="text-xs text-gray-400 hover:text-gray-600 underline">
+            ← Staff home
           </a>
         </div>
       </div>

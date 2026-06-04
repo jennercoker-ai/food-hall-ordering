@@ -64,10 +64,10 @@ function CustomerDashboard() {
           <h1 className="text-3xl font-bold mb-1">Customer Dashboard</h1>
           <p className="text-emerald-100">Track your orders by phone number</p>
           <a
-            href={`${BASE}/?view=demo`}
+            href={`${BASE}/`}
             className="inline-block mt-4 text-sm text-white/90 hover:text-white underline"
           >
-            ← Back to demo hub
+            ← Order food
           </a>
         </div>
       </div>

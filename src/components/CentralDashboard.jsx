@@ -70,7 +70,7 @@ function CentralDashboard() {
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6 shadow-lg">
         <div className="max-w-7xl mx-auto">
-          <a href={`${BASE}/?view=demo`} className="text-sm text-white/90 hover:text-white underline inline-block mb-2">← Back to demo hub</a>
+          <a href={`${BASE}/?view=staff`} className="text-sm text-white/90 hover:text-white underline inline-block mb-2">← Staff home</a>
           <h1 className="text-3xl font-bold mb-2">Central Order Board</h1>
           <p className="text-purple-100">
             Live view of all vendors&apos; orders across the event

@@ -79,10 +79,10 @@ function DeliveryDashboard() {
           <h1 className="text-3xl font-bold mb-1">Delivery Dashboard</h1>
           <p className="text-amber-100">Multi-vendor aggregated deliveries – dispatch & track</p>
           <a
-            href={`${BASE}/?view=demo`}
+            href={`${BASE}/?view=staff`}
             className="inline-block mt-4 text-sm text-white/90 hover:text-white underline"
           >
-            ← Back to demo hub
+            ← Staff home
           </a>
           <div className="flex flex-wrap gap-4 mt-4">
             <div className="bg-white/20 rounded-lg px-4 py-2">

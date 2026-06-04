@@ -7,7 +7,7 @@ import VendorDashboard from './components/VendorDashboard';
 import VendorKDS from './components/VendorKDS';
 import OrderConfirmation from './components/OrderConfirmation';
 import CentralDashboard from './components/CentralDashboard';
-import DemoHub from './components/DemoHub';
+import StaffHub from './components/StaffHub';
 import QRCodePage from './components/QRCodePage';
 import DeliveryTicket from './components/DeliveryTicket';
 import CustomerDashboard from './components/CustomerDashboard';
@@ -34,8 +34,8 @@ function App() {
       setVendorId(vendor);
     } else if (viewParam === 'central') {
       setView('central');
-    } else if (viewParam === 'demo') {
-      setView('demo');
+    } else if (viewParam === 'demo' || viewParam === 'staff') {
+      setView('staff');
     } else if (viewParam === 'qr') {
       setView('qr');
     } else if (viewParam === 'order') {
@@ -59,13 +59,20 @@ function App() {
       });
     } else if (viewParam === 'family' || viewParam === 'group-order') {
       setView('family');
-    } else {
-      // Unified chatbot - works with or without vendor
+    } else if (viewParam === 'chat') {
       setVendorId(vendor || null);
       const group = params.get('group');
       setGroupId(group || null);
-      initializeSession(vendor || null, location || 'Event').then(() => {
+      initializeSession(vendor || null, location || 'Food Hall').then(() => {
         setView('chat');
+      });
+    } else {
+      // Default: Food Hall Concierge (live customer ordering)
+      setVendorId(vendor || null);
+      const group = params.get('group');
+      setGroupId(group || null);
+      initializeSession(vendor || null, location || 'Food Hall').then(() => {
+        setView('concierge');
       });
     }
   }, [initializeSession]);
@@ -87,8 +94,8 @@ function App() {
     return <CentralDashboard />;
   }
 
-  if (view === 'demo') {
-    return <DemoHub />;
+  if (view === 'staff') {
+    return <StaffHub />;
   }
 
   if (view === 'qr') {
