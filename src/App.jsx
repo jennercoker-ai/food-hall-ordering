@@ -12,6 +12,7 @@ import QRCodePage from './components/QRCodePage';
 import DeliveryTicket from './components/DeliveryTicket';
 import CustomerDashboard from './components/CustomerDashboard';
 import DeliveryDashboard from './components/DeliveryDashboard';
+import AdminDashboard from './components/AdminDashboard';
 import VendorPicker from './components/VendorPicker';
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
   const [orderId, setOrderId] = useState(null);
   const [deliveryId, setDeliveryId] = useState(null);
   const [groupId, setGroupId] = useState(null);
+  const [deviceId, setDeviceId] = useState(null);
   const { initializeSession, session } = useStore();
 
   useEffect(() => {
@@ -28,6 +30,8 @@ function App() {
     const vendor = params.get('vendor');
     const location = params.get('location');
     const viewParam = params.get('view');
+    const device = params.get('device');
+    if (device) setDeviceId(device);
 
     if (viewParam === 'vendor') {
       setView('vendor');
@@ -36,6 +40,8 @@ function App() {
       setView('central');
     } else if (viewParam === 'demo' || viewParam === 'staff') {
       setView('staff');
+    } else if (viewParam === 'admin') {
+      setView('admin');
     } else if (viewParam === 'qr') {
       setView('qr');
     } else if (viewParam === 'order') {
@@ -98,6 +104,10 @@ function App() {
     return <StaffHub />;
   }
 
+  if (view === 'admin') {
+    return <AdminDashboard />;
+  }
+
   if (view === 'qr') {
     return <QRCodePage />;
   }
@@ -120,7 +130,7 @@ function App() {
 
   if (view === 'kds') {
     if (!vendorId) return <VendorPicker onSelect={(id) => setVendorId(id)} forKDS={true} />;
-    return <VendorKDS vendorId={vendorId} />;
+    return <VendorKDS vendorId={vendorId} deviceId={deviceId} />;
   }
 
   if (view === 'concierge') {

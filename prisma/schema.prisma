@@ -27,6 +27,20 @@ enum OrderType {
   DELIVERY
 }
 
+enum EmployeeRole {
+  ADMIN
+  MANAGER
+  STAFF
+  KITCHEN
+}
+
+enum DeviceType {
+  KDS
+  VENDOR_DISPLAY
+  QR_STATION
+  CENTRAL_BOARD
+}
+
 model Vendor {
   id              String      @id @default(cuid())
   name            String
@@ -36,6 +50,8 @@ model Vendor {
   menuItems       MenuItem[]
   orderItems      OrderItem[]
   orders          Order[]
+  employees       Employee[]
+  devices         Device[]
 }
 
 model MenuItem {
@@ -104,4 +120,38 @@ model OrderItem {
   @@index([orderId])
   @@index([vendorId])
   @@index([status])
+}
+
+model Employee {
+  id        String       @id @default(cuid())
+  name      String
+  email     String?      @unique
+  phone     String?
+  role      EmployeeRole @default(STAFF)
+  pin       String?      // optional PIN for device sign-in
+  active    Boolean      @default(true)
+  vendorId  String?
+  vendor    Vendor?      @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([vendorId])
+  @@index([role])
+}
+
+model Device {
+  id         String     @id @default(cuid())
+  name       String
+  type       DeviceType
+  location   String?
+  config     Json?
+  active     Boolean    @default(true)
+  vendorId   String?
+  vendor     Vendor?    @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  lastSeenAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@index([vendorId])
+  @@index([type])
 }

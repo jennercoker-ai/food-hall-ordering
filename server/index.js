@@ -8,6 +8,7 @@ const http = require('http');
 require('dotenv').config();
 
 const { createConciergeRoutes } = require('./concierge');
+const { createAdminRoutes } = require('./admin');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -600,6 +601,9 @@ initializeData();
 
 // Initialize Food Hall Concierge routes
 createConciergeRoutes(app, prisma, database);
+
+// Admin API — menu, employees, devices (requires ADMIN_PASSWORD)
+createAdminRoutes(app, { prisma, database });
 
 // WebSocket connection handling
 const vendorConnections = new Map();
@@ -2551,6 +2555,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`📋 Staff home: ${publicUrl}/?view=staff`);
     console.log(`🎩 Order:    ${publicUrl}/`);
     console.log(`📲 QR codes: ${publicUrl}/?view=qr`);
+    console.log(`🔐 Admin:    ${publicUrl}/?view=admin`);
     console.log(`🍳 KDS:      ${publicUrl}/?view=kds`);
   }
 });

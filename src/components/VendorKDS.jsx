@@ -27,12 +27,14 @@ const statusBg = {
   COLLECTED: 'bg-blue-500'
 };
 
-export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
+export default function VendorKDS({ vendorId, vendorName, collectionPoint, deviceId }) {
   const [orderItems, setOrderItems] = useState([]);
   const [vendor, setVendor] = useState({ name: vendorName, collectionPoint });
   const [isConnected, setIsConnected] = useState(false);
   const [filter, setFilter] = useState('active'); // 'active', 'ready', 'all'
   const [isLoading, setIsLoading] = useState(true);
+  const [deviceConfig, setDeviceConfig] = useState(null);
+  const pollMs = Math.max(5000, (deviceConfig?.config?.refreshIntervalSec || 10) * 1000);
 
   // Fetch vendor info
   useEffect(() => {
@@ -47,6 +49,19 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
         .catch(console.error);
     }
   }, [vendorId]);
+
+  // Load registered device config (refresh interval, sound, etc.)
+  useEffect(() => {
+    if (!deviceId) return;
+    fetch(`${API_URL}/api/devices/${deviceId}/config`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setDeviceConfig(data); })
+      .catch(() => {});
+    const heartbeat = setInterval(() => {
+      fetch(`${API_URL}/api/devices/${deviceId}/heartbeat`, { method: 'POST' }).catch(() => {});
+    }, 60000);
+    return () => clearInterval(heartbeat);
+  }, [deviceId]);
 
   // Fetch order items for this vendor
   const fetchOrderItems = useCallback(async () => {
@@ -67,9 +82,9 @@ export default function VendorKDS({ vendorId, vendorName, collectionPoint }) {
 
   useEffect(() => {
     fetchOrderItems();
-    const interval = setInterval(fetchOrderItems, 10000);
+    const interval = setInterval(fetchOrderItems, pollMs);
     return () => clearInterval(interval);
-  }, [fetchOrderItems]);
+  }, [fetchOrderItems, pollMs]);
 
   const lineItemId = (item) => item.id || item.orderLineId;
 

@@ -57,6 +57,13 @@ const staffLinks = [
     url: `${BASE}/?view=delivery-dashboard`,
     icon: '🚚',
   },
+  {
+    title: 'Admin',
+    description: 'Manage menu items, employees, and registered devices',
+    url: `${BASE}/?view=admin`,
+    icon: '⚙️',
+    highlight: true,
+  },
 ];
 
 function StaffHub() {
