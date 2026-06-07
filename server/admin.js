@@ -79,7 +79,45 @@ function deviceLaunchUrl(type, vendorId, publicUrl, deviceId) {
   }
 }
 
-function createAdminRoutes(app, { prisma, database }) {
+async function withDatabase(getPrisma, dbWork, memoryWork) {
+  const client = typeof getPrisma === 'function' ? getPrisma() : null;
+  if (client) {
+    try {
+      return await dbWork(client);
+    } catch (e) {
+      console.error('admin db fallback:', e.message || e);
+    }
+  }
+  return memoryWork();
+}
+
+async function tryDatabase(getPrisma, dbWork) {
+  const client = typeof getPrisma === 'function' ? getPrisma() : null;
+  if (!client) return null;
+  try {
+    return await dbWork(client);
+  } catch (e) {
+    console.error('admin db write fallback:', e.message || e);
+    return null;
+  }
+}
+
+function memoryMenuItems(database, vendorId) {
+  const items = [];
+  database.menus.forEach((menu, vid) => {
+    if (vendorId && vid !== vendorId) return;
+    menu.forEach((item) => {
+      const vendor = database.vendors.get(vid);
+      items.push({
+        ...item,
+        vendor: vendor ? { id: vendor.id, name: vendor.name } : null
+      });
+    });
+  });
+  return items;
+}
+
+function createAdminRoutes(app, { getPrisma, database }) {
   if (!database.employees) database.employees = new Map();
   if (!database.devices) database.devices = new Map();
 
@@ -104,7 +142,7 @@ function createAdminRoutes(app, { prisma, database }) {
   app.get('/api/admin/status', requireAdmin, (req, res) => {
     res.json({
       ok: true,
-      database: Boolean(prisma),
+      database: Boolean(typeof getPrisma === 'function' ? getPrisma() : null),
       publicUrl: publicUrl()
     });
   });
@@ -112,14 +150,15 @@ function createAdminRoutes(app, { prisma, database }) {
   // ─── Vendors (for dropdowns) ───────────────────────────────────────────────
   app.get('/api/admin/vendors', requireAdmin, async (req, res) => {
     try {
-      if (prisma) {
-        const vendors = await prisma.vendor.findMany({ orderBy: { name: 'asc' } });
-        return res.json(vendors);
-      }
-      res.json(Array.from(database.vendors.values()));
+      const vendors = await withDatabase(
+        getPrisma,
+        (client) => client.vendor.findMany({ orderBy: { name: 'asc' } }),
+        () => Array.from(database.vendors.values())
+      );
+      res.json(vendors);
     } catch (e) {
       console.error('admin vendors:', e);
-      res.status(500).json({ error: 'Failed to load vendors' });
+      res.json(Array.from(database.vendors.values()));
     }
   });
 
@@ -127,30 +166,22 @@ function createAdminRoutes(app, { prisma, database }) {
   app.get('/api/admin/menu-items', requireAdmin, async (req, res) => {
     const { vendorId } = req.query;
     try {
-      if (prisma) {
-        const where = vendorId ? { vendorId } : {};
-        const items = await prisma.menuItem.findMany({
-          where,
-          include: { vendor: { select: { id: true, name: true } } },
-          orderBy: [{ vendor: { name: 'asc' } }, { category: 'asc' }, { name: 'asc' }]
-        });
-        return res.json(items);
-      }
-      let items = [];
-      database.menus.forEach((menu, vid) => {
-        if (vendorId && vid !== vendorId) return;
-        menu.forEach((item) => {
-          const vendor = database.vendors.get(vid);
-          items.push({
-            ...item,
-            vendor: vendor ? { id: vendor.id, name: vendor.name } : null
+      const items = await withDatabase(
+        getPrisma,
+        (client) => {
+          const where = vendorId ? { vendorId } : {};
+          return client.menuItem.findMany({
+            where,
+            include: { vendor: { select: { id: true, name: true } } },
+            orderBy: [{ vendor: { name: 'asc' } }, { category: 'asc' }, { name: 'asc' }]
           });
-        });
-      });
+        },
+        () => memoryMenuItems(database, vendorId)
+      );
       res.json(items);
     } catch (e) {
       console.error('admin menu list:', e);
-      res.status(500).json({ error: 'Failed to load menu items' });
+      res.json(memoryMenuItems(database, vendorId));
     }
   });
 
@@ -186,22 +217,24 @@ function createAdminRoutes(app, { prisma, database }) {
     };
 
     try {
-      if (prisma) {
-        const item = await prisma.menuItem.create({
+      const item = await tryDatabase(getPrisma, (client) =>
+        client.menuItem.create({
           data,
           include: { vendor: { select: { id: true, name: true } } }
-        });
-        await syncVendorMenuToMemory(prisma, database, vendorId);
+        })
+      );
+      if (item) {
+        await syncVendorMenuToMemory(getPrisma(), database, vendorId);
         return res.status(201).json(item);
       }
 
       const id = `item-${uuidv4().slice(0, 8)}`;
-      const item = menuItemToMemory({ id, ...data });
+      const memItem = menuItemToMemory({ id, ...data });
       const menu = database.menus.get(vendorId) || [];
-      menu.push(item);
+      menu.push(memItem);
       database.menus.set(vendorId, menu);
       const vendor = database.vendors.get(vendorId);
-      res.status(201).json({ ...item, vendor: vendor ? { id: vendor.id, name: vendor.name } : null });
+      res.status(201).json({ ...memItem, vendor: vendor ? { id: vendor.id, name: vendor.name } : null });
     } catch (e) {
       console.error('admin menu create:', e);
       res.status(500).json({ error: e.message || 'Failed to create menu item' });
@@ -222,13 +255,15 @@ function createAdminRoutes(app, { prisma, database }) {
     if (updates.price != null) updates.price = Number(updates.price);
 
     try {
-      if (prisma) {
-        const item = await prisma.menuItem.update({
+      const item = await tryDatabase(getPrisma, (client) =>
+        client.menuItem.update({
           where: { id },
           data: updates,
           include: { vendor: { select: { id: true, name: true } } }
-        });
-        await syncVendorMenuToMemory(prisma, database, item.vendorId);
+        })
+      );
+      if (item) {
+        await syncVendorMenuToMemory(getPrisma(), database, item.vendorId);
         return res.json(item);
       }
 
@@ -255,11 +290,12 @@ function createAdminRoutes(app, { prisma, database }) {
   app.delete('/api/admin/menu-items/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
     try {
-      if (prisma) {
-        const existing = await prisma.menuItem.findUnique({ where: { id } });
-        if (!existing) return res.status(404).json({ error: 'Menu item not found' });
-        await prisma.menuItem.delete({ where: { id } });
-        await syncVendorMenuToMemory(prisma, database, existing.vendorId);
+      const existing = await tryDatabase(getPrisma, (client) =>
+        client.menuItem.findUnique({ where: { id } })
+      );
+      if (existing) {
+        await tryDatabase(getPrisma, (client) => client.menuItem.delete({ where: { id } }));
+        await syncVendorMenuToMemory(getPrisma(), database, existing.vendorId);
         return res.json({ ok: true });
       }
 
@@ -282,22 +318,28 @@ function createAdminRoutes(app, { prisma, database }) {
   // ─── Employees ─────────────────────────────────────────────────────────────
   app.get('/api/admin/employees', requireAdmin, async (req, res) => {
     try {
-      if (prisma) {
-        const employees = await prisma.employee.findMany({
-          include: { vendor: { select: { id: true, name: true } } },
-          orderBy: { name: 'asc' }
-        });
-        return res.json(employees.map((e) => ({ ...e, pin: e.pin ? '****' : null })));
-      }
+      const employees = await withDatabase(
+        getPrisma,
+        (client) =>
+          client.employee.findMany({
+            include: { vendor: { select: { id: true, name: true } } },
+            orderBy: { name: 'asc' }
+          }).then((rows) => rows.map((e) => ({ ...e, pin: e.pin ? '****' : null }))),
+        () =>
+          Array.from(database.employees.values()).map((e) => ({
+            ...e,
+            pin: e.pin ? '****' : null
+          }))
+      );
+      res.json(employees);
+    } catch (e) {
+      console.error('admin employees list:', e);
       res.json(
         Array.from(database.employees.values()).map((e) => ({
           ...e,
           pin: e.pin ? '****' : null
         }))
       );
-    } catch (e) {
-      console.error('admin employees list:', e);
-      res.status(500).json({ error: 'Failed to load employees' });
     }
   });
 
@@ -320,21 +362,23 @@ function createAdminRoutes(app, { prisma, database }) {
     };
 
     try {
-      if (prisma) {
-        const employee = await prisma.employee.create({
+      const employee = await tryDatabase(getPrisma, (client) =>
+        client.employee.create({
           data,
           include: { vendor: { select: { id: true, name: true } } }
-        });
+        })
+      );
+      if (employee) {
         return res.status(201).json({ ...employee, pin: employee.pin ? '****' : null });
       }
 
       const id = uuidv4();
-      const employee = { id, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      database.employees.set(id, employee);
+      const memEmployee = { id, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      database.employees.set(id, memEmployee);
       const vendor = vendorId ? database.vendors.get(vendorId) : null;
       res.status(201).json({
-        ...employee,
-        pin: employee.pin ? '****' : null,
+        ...memEmployee,
+        pin: memEmployee.pin ? '****' : null,
         vendor: vendor ? { id: vendor.id, name: vendor.name } : null
       });
     } catch (e) {
@@ -362,23 +406,25 @@ function createAdminRoutes(app, { prisma, database }) {
     }
 
     try {
-      if (prisma) {
-        const employee = await prisma.employee.update({
+      const employee = await tryDatabase(getPrisma, (client) =>
+        client.employee.update({
           where: { id },
           data: updates,
           include: { vendor: { select: { id: true, name: true } } }
-        });
+        })
+      );
+      if (employee) {
         return res.json({ ...employee, pin: employee.pin ? '****' : null });
       }
 
       const existing = database.employees.get(id);
       if (!existing) return res.status(404).json({ error: 'Employee not found' });
-      const employee = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-      database.employees.set(id, employee);
-      const vendor = employee.vendorId ? database.vendors.get(employee.vendorId) : null;
+      const memEmployee = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+      database.employees.set(id, memEmployee);
+      const vendor = memEmployee.vendorId ? database.vendors.get(memEmployee.vendorId) : null;
       res.json({
-        ...employee,
-        pin: employee.pin ? '****' : null,
+        ...memEmployee,
+        pin: memEmployee.pin ? '****' : null,
         vendor: vendor ? { id: vendor.id, name: vendor.name } : null
       });
     } catch (e) {
@@ -391,10 +437,11 @@ function createAdminRoutes(app, { prisma, database }) {
   app.delete('/api/admin/employees/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
     try {
-      if (prisma) {
-        await prisma.employee.delete({ where: { id } });
-        return res.json({ ok: true });
-      }
+      const deleted = await tryDatabase(getPrisma, (client) =>
+        client.employee.delete({ where: { id } }).then(() => true)
+      );
+      if (deleted) return res.json({ ok: true });
+
       if (!database.employees.has(id)) return res.status(404).json({ error: 'Employee not found' });
       database.employees.delete(id);
       res.json({ ok: true });
@@ -407,27 +454,33 @@ function createAdminRoutes(app, { prisma, database }) {
   // ─── Devices ───────────────────────────────────────────────────────────────
   app.get('/api/admin/devices', requireAdmin, async (req, res) => {
     try {
-      if (prisma) {
-        const devices = await prisma.device.findMany({
-          include: { vendor: { select: { id: true, name: true } } },
-          orderBy: { name: 'asc' }
-        });
-        return res.json(
-          devices.map((d) => ({
+      const devices = await withDatabase(
+        getPrisma,
+        (client) =>
+          client.device.findMany({
+            include: { vendor: { select: { id: true, name: true } } },
+            orderBy: { name: 'asc' }
+          }).then((rows) =>
+            rows.map((d) => ({
+              ...d,
+              launchUrl: deviceLaunchUrl(d.type, d.vendorId, publicUrl(), d.id)
+            }))
+          ),
+        () =>
+          Array.from(database.devices.values()).map((d) => ({
             ...d,
             launchUrl: deviceLaunchUrl(d.type, d.vendorId, publicUrl(), d.id)
           }))
-        );
-      }
+      );
+      res.json(devices);
+    } catch (e) {
+      console.error('admin devices list:', e);
       res.json(
         Array.from(database.devices.values()).map((d) => ({
           ...d,
           launchUrl: deviceLaunchUrl(d.type, d.vendorId, publicUrl(), d.id)
         }))
       );
-    } catch (e) {
-      console.error('admin devices list:', e);
-      res.status(500).json({ error: 'Failed to load devices' });
     }
   });
 
@@ -449,11 +502,13 @@ function createAdminRoutes(app, { prisma, database }) {
     };
 
     try {
-      if (prisma) {
-        const device = await prisma.device.create({
+      const device = await tryDatabase(getPrisma, (client) =>
+        client.device.create({
           data,
           include: { vendor: { select: { id: true, name: true } } }
-        });
+        })
+      );
+      if (device) {
         return res.status(201).json({
           ...device,
           launchUrl: deviceLaunchUrl(device.type, device.vendorId, publicUrl(), device.id)
@@ -461,19 +516,19 @@ function createAdminRoutes(app, { prisma, database }) {
       }
 
       const id = uuidv4();
-      const device = {
+      const memDevice = {
         id,
         ...data,
         lastSeenAt: null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
-      database.devices.set(id, device);
+      database.devices.set(id, memDevice);
       const vendor = vendorId ? database.vendors.get(vendorId) : null;
       res.status(201).json({
-        ...device,
+        ...memDevice,
         vendor: vendor ? { id: vendor.id, name: vendor.name } : null,
-        launchUrl: deviceLaunchUrl(device.type, device.vendorId, publicUrl(), device.id)
+        launchUrl: deviceLaunchUrl(memDevice.type, memDevice.vendorId, publicUrl(), memDevice.id)
       });
     } catch (e) {
       console.error('admin device create:', e);
@@ -495,12 +550,14 @@ function createAdminRoutes(app, { prisma, database }) {
     }
 
     try {
-      if (prisma) {
-        const device = await prisma.device.update({
+      const device = await tryDatabase(getPrisma, (client) =>
+        client.device.update({
           where: { id },
           data: updates,
           include: { vendor: { select: { id: true, name: true } } }
-        });
+        })
+      );
+      if (device) {
         return res.json({
           ...device,
           launchUrl: deviceLaunchUrl(device.type, device.vendorId, publicUrl(), device.id)
@@ -509,13 +566,13 @@ function createAdminRoutes(app, { prisma, database }) {
 
       const existing = database.devices.get(id);
       if (!existing) return res.status(404).json({ error: 'Device not found' });
-      const device = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-      database.devices.set(id, device);
-      const vendor = device.vendorId ? database.vendors.get(device.vendorId) : null;
+      const memDevice = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+      database.devices.set(id, memDevice);
+      const vendor = memDevice.vendorId ? database.vendors.get(memDevice.vendorId) : null;
       res.json({
-        ...device,
+        ...memDevice,
         vendor: vendor ? { id: vendor.id, name: vendor.name } : null,
-        launchUrl: deviceLaunchUrl(device.type, device.vendorId, publicUrl(), device.id)
+        launchUrl: deviceLaunchUrl(memDevice.type, memDevice.vendorId, publicUrl(), memDevice.id)
       });
     } catch (e) {
       if (e?.code === 'P2025') return res.status(404).json({ error: 'Device not found' });
@@ -526,10 +583,11 @@ function createAdminRoutes(app, { prisma, database }) {
   app.delete('/api/admin/devices/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
     try {
-      if (prisma) {
-        await prisma.device.delete({ where: { id } });
-        return res.json({ ok: true });
-      }
+      const deleted = await tryDatabase(getPrisma, (client) =>
+        client.device.delete({ where: { id } }).then(() => true)
+      );
+      if (deleted) return res.json({ ok: true });
+
       if (!database.devices.has(id)) return res.status(404).json({ error: 'Device not found' });
       database.devices.delete(id);
       res.json({ ok: true });
@@ -543,8 +601,9 @@ function createAdminRoutes(app, { prisma, database }) {
   app.post('/api/devices/:id/heartbeat', async (req, res) => {
     const { id } = req.params;
     try {
-      if (prisma) {
-        const device = await prisma.device.update({
+      const client = typeof getPrisma === 'function' ? getPrisma() : null;
+      if (client) {
+        const device = await client.device.update({
           where: { id },
           data: { lastSeenAt: new Date() }
         }).catch(() => null);
@@ -566,12 +625,14 @@ function createAdminRoutes(app, { prisma, database }) {
     const { id } = req.params;
     try {
       let device = null;
-      if (prisma) {
-        device = await prisma.device.findUnique({
+      const client = typeof getPrisma === 'function' ? getPrisma() : null;
+      if (client) {
+        device = await client.device.findUnique({
           where: { id },
           include: { vendor: { select: { id: true, name: true } } }
-        });
-      } else {
+        }).catch(() => null);
+      }
+      if (!device) {
         device = database.devices.get(id) || null;
       }
       if (!device || !device.active) {

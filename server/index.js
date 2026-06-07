@@ -603,7 +603,7 @@ initializeData();
 createConciergeRoutes(app, prisma, database);
 
 // Admin API — menu, employees, devices (requires ADMIN_PASSWORD)
-createAdminRoutes(app, { prisma, database });
+createAdminRoutes(app, { getPrisma: () => prisma, database });
 
 // WebSocket connection handling
 const vendorConnections = new Map();
