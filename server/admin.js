@@ -117,6 +117,20 @@ function memoryMenuItems(database, vendorId) {
   return items;
 }
 
+function formatVendor(v) {
+  if (!v) return v;
+  const cuisine = v.cuisine || v.description || '';
+  return {
+    id: v.id,
+    name: v.name,
+    cuisine,
+    description: v.description || v.cuisine || '',
+    collectionPoint: v.collectionPoint || null,
+    imageUrl: v.imageUrl || null,
+    active: v.active !== false
+  };
+}
+
 function createAdminRoutes(app, { getPrisma, database }) {
   if (!database.employees) database.employees = new Map();
   if (!database.devices) database.devices = new Map();
@@ -155,10 +169,128 @@ function createAdminRoutes(app, { getPrisma, database }) {
         (client) => client.vendor.findMany({ orderBy: { name: 'asc' } }),
         () => Array.from(database.vendors.values())
       );
-      res.json(vendors);
+      res.json(vendors.map(formatVendor));
     } catch (e) {
       console.error('admin vendors:', e);
-      res.json(Array.from(database.vendors.values()));
+      res.json(Array.from(database.vendors.values()).map(formatVendor));
+    }
+  });
+
+  app.post('/api/admin/vendors', requireAdmin, async (req, res) => {
+    const { name, cuisine, description, collectionPoint, imageUrl, active } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const cuisineVal = String(cuisine || description || 'General').trim();
+    const data = {
+      name: String(name).trim(),
+      cuisine: cuisineVal,
+      collectionPoint: collectionPoint ? String(collectionPoint).trim() : null,
+      imageUrl: imageUrl ? String(imageUrl).trim() : null
+    };
+
+    try {
+      const vendor = await tryDatabase(getPrisma, (client) => client.vendor.create({ data }));
+      if (vendor) {
+        return res.status(201).json(formatVendor(vendor));
+      }
+
+      const id = `vendor-${uuidv4().slice(0, 8)}`;
+      const memVendor = {
+        id,
+        ...data,
+        description: String(description || cuisineVal).trim(),
+        active: active !== false
+      };
+      database.vendors.set(id, memVendor);
+      if (!database.menus.has(id)) database.menus.set(id, []);
+      res.status(201).json(formatVendor(memVendor));
+    } catch (e) {
+      console.error('admin vendor create:', e);
+      res.status(500).json({ error: e.message || 'Failed to create vendor' });
+    }
+  });
+
+  app.patch('/api/admin/vendors/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const body = req.body || {};
+    const updates = {};
+
+    if (body.name !== undefined) updates.name = String(body.name).trim();
+    if (body.collectionPoint !== undefined) {
+      updates.collectionPoint = body.collectionPoint ? String(body.collectionPoint).trim() : null;
+    }
+    if (body.imageUrl !== undefined) {
+      updates.imageUrl = body.imageUrl ? String(body.imageUrl).trim() : null;
+    }
+    if (body.cuisine !== undefined || body.description !== undefined) {
+      const cuisineVal = String(body.cuisine || body.description || 'General').trim();
+      updates.cuisine = cuisineVal;
+      if (body.description !== undefined) {
+        updates.description = String(body.description || cuisineVal).trim();
+      }
+    }
+    if (body.active !== undefined) updates.active = body.active !== false;
+
+    if (updates.name !== undefined && !updates.name) {
+      return res.status(400).json({ error: 'name cannot be empty' });
+    }
+
+    try {
+      const prismaUpdates = { ...updates };
+      delete prismaUpdates.description;
+      delete prismaUpdates.active;
+
+      const vendor = await tryDatabase(getPrisma, (client) =>
+        client.vendor.update({ where: { id }, data: prismaUpdates })
+      );
+      if (vendor) {
+        return res.json(formatVendor(vendor));
+      }
+
+      const existing = database.vendors.get(id);
+      if (!existing) return res.status(404).json({ error: 'Vendor not found' });
+      const memVendor = { ...existing, ...updates };
+      database.vendors.set(id, memVendor);
+      res.json(formatVendor(memVendor));
+    } catch (e) {
+      if (e?.code === 'P2025') return res.status(404).json({ error: 'Vendor not found' });
+      console.error('admin vendor update:', e);
+      res.status(500).json({ error: e.message || 'Failed to update vendor' });
+    }
+  });
+
+  app.delete('/api/admin/vendors/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const menuCount = await withDatabase(
+        getPrisma,
+        (client) => client.menuItem.count({ where: { vendorId: id } }),
+        () => (database.menus.get(id) || []).length
+      );
+      if (menuCount > 0) {
+        return res.status(400).json({
+          error: 'Remove all menu items from this vendor before deleting it'
+        });
+      }
+
+      const deleted = await tryDatabase(getPrisma, (client) =>
+        client.vendor.delete({ where: { id } }).then(() => true)
+      );
+      if (deleted) return res.json({ ok: true });
+
+      if (!database.vendors.has(id)) {
+        return res.status(404).json({ error: 'Vendor not found' });
+      }
+      database.vendors.delete(id);
+      database.menus.delete(id);
+      res.json({ ok: true });
+    } catch (e) {
+      if (e?.code === 'P2025') return res.status(404).json({ error: 'Vendor not found' });
+      console.error('admin vendor delete:', e);
+      res.status(500).json({ error: e.message || 'Failed to delete vendor' });
     }
   });
 

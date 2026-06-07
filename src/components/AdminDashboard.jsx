@@ -85,13 +85,25 @@ function groupMenuByCategory(items) {
     }));
 }
 
-function VendorSidebar({ vendors, menuItems, selectedId, onSelect }) {
+function VendorSidebar({ vendors, menuItems, selectedId, onSelect, onAddVendor }) {
   const countFor = (vendorId) => menuItems.filter((m) => m.vendorId === vendorId).length;
 
   return (
     <aside className="w-full lg:w-64 shrink-0">
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 px-1">Vendors</p>
+      <div className="flex items-center justify-between mb-2 px-1">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Vendors</p>
+        <button
+          type="button"
+          onClick={onAddVendor}
+          className="text-xs px-2 py-1 rounded-lg bg-green-600/80 hover:bg-green-500 text-white font-medium"
+        >
+          + New
+        </button>
+      </div>
       <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0">
+        {vendors.length === 0 && (
+          <p className="text-xs text-slate-500 px-1 py-2">No vendors yet — add your first stall.</p>
+        )}
         {vendors.map((v) => {
           const active = v.id === selectedId;
           const count = countFor(v.id);
@@ -280,7 +292,16 @@ export default function AdminDashboard() {
 
   const openNew = (type) => {
     setEditing({ type, id: null });
-    if (type === 'menu') {
+    if (type === 'vendor') {
+      setForm({
+        name: '',
+        cuisine: '',
+        description: '',
+        collectionPoint: '',
+        imageUrl: '',
+        active: true
+      });
+    } else if (type === 'menu') {
       setForm(blankMenuForm(selectedVendorId));
     } else if (type === 'employee') {
       setForm({ name: '', email: '', phone: '', role: 'STAFF', vendorId: selectedVendorId || '', pin: '', active: true });
@@ -299,7 +320,16 @@ export default function AdminDashboard() {
 
   const openEdit = (type, row) => {
     setEditing({ type, id: row.id });
-    if (type === 'menu') {
+    if (type === 'vendor') {
+      setForm({
+        name: row.name,
+        cuisine: row.cuisine || row.description || '',
+        description: row.description || row.cuisine || '',
+        collectionPoint: row.collectionPoint || '',
+        imageUrl: row.imageUrl || '',
+        active: row.active !== false
+      });
+    } else if (type === 'menu') {
       setForm({
         vendorId: row.vendorId,
         name: row.name,
@@ -339,7 +369,25 @@ export default function AdminDashboard() {
     setError('');
     try {
       const { type, id } = editing;
-      if (type === 'menu') {
+      if (type === 'vendor') {
+        const body = {
+          name: form.name,
+          cuisine: form.cuisine || form.description || 'General',
+          description: form.description || form.cuisine || '',
+          collectionPoint: form.collectionPoint || null,
+          imageUrl: form.imageUrl || null,
+          active: form.active
+        };
+        if (id) {
+          await adminFetch(`/api/admin/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        } else {
+          const created = await adminFetch('/api/admin/vendors', { method: 'POST', body: JSON.stringify(body) });
+          setEditing(null);
+          await loadAll();
+          if (created?.id) selectVendor(created.id);
+          return;
+        }
+      } else if (type === 'menu') {
         const body = {
           vendorId: form.vendorId,
           name: form.name,
@@ -388,9 +436,15 @@ export default function AdminDashboard() {
   };
 
   const remove = async (type, id) => {
-    if (!window.confirm('Delete this item?')) return;
+    const msg = type === 'vendor'
+      ? 'Delete this vendor? All menu items must be removed first.'
+      : 'Delete this item?';
+    if (!window.confirm(msg)) return;
     try {
-      if (type === 'menu') await adminFetch(`/api/admin/menu-items/${id}`, { method: 'DELETE' });
+      if (type === 'vendor') {
+        await adminFetch(`/api/admin/vendors/${id}`, { method: 'DELETE' });
+        setSelectedVendorId(null);
+      } else if (type === 'menu') await adminFetch(`/api/admin/menu-items/${id}`, { method: 'DELETE' });
       else if (type === 'employee') await adminFetch(`/api/admin/employees/${id}`, { method: 'DELETE' });
       else await adminFetch(`/api/admin/devices/${id}`, { method: 'DELETE' });
       loadAll();
@@ -464,10 +518,22 @@ export default function AdminDashboard() {
               menuItems={menuItems}
               selectedId={selectedVendorId}
               onSelect={selectVendor}
+              onAddVendor={() => openNew('vendor')}
             />
 
             <div className="flex-1 min-w-0">
-              {!selectedVendor ? (
+              {vendors.length === 0 ? (
+                <div className="text-center py-16 rounded-2xl border border-dashed border-slate-600">
+                  <p className="text-slate-400 mb-4">Add your first food vendor to start building menus.</p>
+                  <button
+                    type="button"
+                    onClick={() => openNew('vendor')}
+                    className="px-5 py-2.5 rounded-lg bg-green-600 hover:bg-green-500 font-semibold"
+                  >
+                    + Add vendor
+                  </button>
+                </div>
+              ) : !selectedVendor ? (
                 <p className="text-slate-400">Select a vendor to manage their menu.</p>
               ) : (
                 <>
@@ -475,12 +541,35 @@ export default function AdminDashboard() {
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <h2 className="text-2xl font-bold">{selectedVendor.name}</h2>
-                        {selectedVendor.description && (
-                          <p className="text-slate-400 text-sm mt-1 max-w-xl">{selectedVendor.description}</p>
+                        {(selectedVendor.cuisine || selectedVendor.description) && (
+                          <p className="text-slate-400 text-sm mt-1 max-w-xl">
+                            {selectedVendor.cuisine && selectedVendor.cuisine !== selectedVendor.description && (
+                              <span className="text-purple-300">{selectedVendor.cuisine} · </span>
+                            )}
+                            {selectedVendor.description}
+                          </p>
                         )}
                         {selectedVendor.collectionPoint && (
                           <p className="text-xs text-purple-300 mt-2">Collection: {selectedVendor.collectionPoint}</p>
                         )}
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          <button
+                            type="button"
+                            onClick={() => openEdit('vendor', selectedVendor)}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200"
+                          >
+                            Edit vendor
+                          </button>
+                          {vendorMenu.length === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => remove('vendor', selectedVendor.id)}
+                              className="text-xs px-3 py-1.5 rounded-lg bg-red-900/40 hover:bg-red-900/60 text-red-300"
+                            >
+                              Delete vendor
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2 text-center">
                         <div className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 min-w-[72px]">
@@ -713,10 +802,42 @@ export default function AdminDashboard() {
           <div className="bg-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 border border-slate-600">
             <h2 className="text-lg font-bold mb-1">
               {editing.id ? 'Edit' : 'Add'}{' '}
-              {editing.type === 'menu' ? 'menu item' : editing.type === 'employee' ? 'staff member' : 'device'}
+              {editing.type === 'vendor'
+                ? 'vendor'
+                : editing.type === 'menu'
+                  ? 'menu item'
+                  : editing.type === 'employee'
+                    ? 'staff member'
+                    : 'device'}
             </h2>
             {editing.type === 'menu' && selectedVendor && (
               <p className="text-sm text-slate-400 mb-4">{selectedVendor.name}</p>
+            )}
+
+            {editing.type === 'vendor' && (
+              <>
+                <Field label="Vendor name">
+                  <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Tony's Pizza" required />
+                </Field>
+                <Field label="Cuisine / food type">
+                  <input className={inputCls} value={form.cuisine} onChange={(e) => setForm({ ...form, cuisine: e.target.value })} placeholder="e.g. Italian, Mexican, Coffee" />
+                </Field>
+                <Field label="Short description">
+                  <textarea className={inputCls} rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What customers see on the menu listing" />
+                </Field>
+                <Field label="Collection point">
+                  <input className={inputCls} value={form.collectionPoint} onChange={(e) => setForm({ ...form, collectionPoint: e.target.value })} placeholder="e.g. Station 3, Counter B" />
+                </Field>
+                <Field label="Image URL (optional)">
+                  <input className={inputCls} value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} placeholder="https://..." />
+                </Field>
+                {editing.id && (
+                  <label className="flex items-center gap-2 mb-4 text-sm">
+                    <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+                    Active (visible to customers)
+                  </label>
+                )}
+              </>
             )}
 
             {editing.type === 'menu' && (
